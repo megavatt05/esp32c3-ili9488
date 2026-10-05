@@ -9,6 +9,16 @@
  */
 
 #include <stdio.h>
+// ВАЖНО: системные заголовки должны идти ДО "ui.h" — ui.h включает lvgl.h,
+// который в ESP-IDF 6.x тянет сетевые заголовки (lwip/sockets.h), задающие
+// макросы close/read/write и конфликтующие со стандартными <unistd.h>.
+// Порядок гарантирует корректную видимость BSD-сокет API во всех .c файлах.
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "ui.h"
 // Подключение LVGL: короткий путь "lvgl.h".
 // Макрос LV_LVGL_H_INCLUDE_SIMPLE определён в main/CMakeLists.txt через

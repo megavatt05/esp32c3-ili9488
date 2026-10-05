@@ -159,6 +159,49 @@ endif()
 
 ---
 
+## 11. Ошибки BSD-сокетов в `softap.c`: `sockaddr_in`/`socklen_t`/`recvfrom`/`socket` не объявлены + `WIFI_AP_STARTUP` undeclared + `ESP_RETURN_ON_ERROR` implicit
+**Ветка:** softap-webui · **Коммит:** (этот пуш)
+
+**Симптом (gcc, IDF v6.0.3):**
+```
+error: 'WIFI_AP_STARTUP' undeclared; did you mean 'ESP_ERR_NOT_FOUND'?
+error: storage size of 'src' isn't known          // struct sockaddr_in
+error: unknown type name 'socklen_t'; did you mean 'locale_t'?
+error: implicit declaration of function 'recvfrom' / 'sendto' / 'socket' / 'bind' / 'setsockopt' / 'close'
+error: 'AF_INET' / 'SOCK_DGRAM' / 'IPPROTO_UDP' / 'SOL_SOCKET' / 'SO_REUSEADDR' / 'INADDR_ANY' undeclared
+error: implicit declaration of function 'ESP_RETURN_ON_ERROR'
+cc1.exe: all warnings being treated as errors
+```
+
+**Причины (три независимые):**
+1. **Сетевые заголовки не подтягиваются транзитивно.** В IDF 6.x `esp_wifi.h`/`esp_netif.h` больше не включают `<sys/socket.h>` и `<netinet/in.h>` косвенно. Все BSD-сокет API (`socket/bind/recvfrom/sendto/setsockopt/close`, типы `sockaddr_in`, `socklen_t`, константы `AF_INET/SOCK_DGRAM/IPPROTO_UDP/SOL_SOCKET/SO_REUSEADDR/INADDR_ANY`) требуют явных инклюдов.
+2. **Переименование события Wi-Fi.** В IDF 6.x событие старта точки доступа называется `WIFI_EVENT_AP_STARTUP`; старый алиас `WIFI_AP_STARTUP` удалён из `esp_wifi_types.h`.
+3. **Макросы esp_check.h не видны.** `ESP_RETURN_ON_ERROR` живёт в `esp_check.h`, который в 6.x не включается транзитивно через `esp_log.h`/`nvs_flash.h`.
+
+**Решение (в `main/softap.c`):**
+```c
+#include <unistd.h>         // close()
+#include <sys/socket.h>     // socket/bind/recvfrom/sendto/setsockopt
+#include <sys/types.h>      // ssize_t
+#include <netinet/in.h>     // sockaddr_in, AF_INET, IPPROTO_UDP, htons
+#include <arpa/inet.h>
+#include "esp_check.h"      // ESP_RETURN_ON_ERROR
+
+// Совместимость имени события AP-старта между IDF 5.x/6.x:
+#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
+#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
+#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
+#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
+#endif
+// в обработчике: if (id == WIFI_EVENT_AP_STARTUP) { ... }
+```
+
+**Дополнительно (защита от неопределённого поведения в других TU):** в `main/ui.c` системные сетевые заголовки размещены ДО `#include "ui.h"` (который тянет LVGL), т.к. в IDF 6.x lvgl.h может подключать lwip-обёртки, конфликтующие с `<unistd.h>` при обратном порядке.
+
+**Профилактика:** любой файл, использующий сокеты, обязан сам включать полный набор `<sys/socket.h> + <netinet/in.h> + <unistd.h>` — никогда не полагаться на транзитивные инклюды компонентов IDF.
+
+---
+
 ## Общие правила (чек-лист перед push)
 - [ ] `idf.py build` проходит локально (или CI зелёный) ДО пуша;
 - [ ] после правки `REQUIRES`/`sdkconfig.defaults` — `idf.py fullclean` (+ удалить `sdkconfig`, если менялись defaults);

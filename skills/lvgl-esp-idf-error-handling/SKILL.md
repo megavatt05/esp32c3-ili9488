@@ -84,6 +84,33 @@
 - В DHCP-опции маршрутизатора должен отдаваться AP-шлюз как DNS (esp_netif DHCPServer
   делает это по умолчанию — не переопределять вручную).
 
+## 8. BSD-сокеты в softap.c: `sockaddr_in`/`socklen_t`/`recvfrom`/`socket` не объявлены; `WIFI_AP_STARTUP` undeclared; `ESP_RETURN_ON_ERROR` implicit (ESP-IDF 6.x)
+
+**Симптом:** десятки ошибок вида `storage size of 'src' isn't known`, `unknown type name 'socklen_t'`, `implicit declaration of function 'recvfrom'/'sendto'/'socket'/'bind'/'setsockopt'/'close'`, `'AF_INET'/'SOCK_DGRAM'/'SOL_SOCKET'/'INADDR_ANY' undeclared`, `'WIFI_AP_STARTUP' undeclared`, `implicit declaration of function 'ESP_RETURN_ON_ERROR'`.
+
+**Причины:**
+1. IDF 6.x убрал транзитивные инклюды сетевых заголовков из esp_wifi.h/esp_netif.h — BSD-сокет API нужно подключать явно.
+2. Событие старта AP переименовано: `WIFI_AP_STARTUP` → `WIFI_EVENT_AP_STARTUP` (алиас удалён).
+3. Макросы `ESP_RETURN_ON_ERROR` требуют явного `#include "esp_check.h"`.
+
+**Решение:** в начало файла добавить:
+```c
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include "esp_check.h"
+#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
+#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
+#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
+#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
+#endif
+```
+и использовать `WIFI_EVENT_AP_STARTUP` в обработчике событий. Системные сетевые инклюды размещать ДО lvgl-заголовков (в ui.c — до "ui.h"), чтобы избежать конфликтов макросов close/read/write с lwip-обёртками.
+
+**Профилактика:** любой .c с сокетами сам включает полный набор `<sys/socket.h>+<netinet/in.h>+<unistd.h>`; никогда не полагаться на транзитивные инклюды компонентов IDF.
+
 ## 7. Чек-лист перед push ветки с LVGL
 - [ ] `.gitignore` содержит `build/` и `managed_components/`
 - [ ] define LV_LVGL_H_INCLUDE_SIMPLE есть и в CMakeLists, и в sdkconfig.defaults
