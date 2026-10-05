@@ -1,5 +1,19 @@
 # Навык: отработка типовых ошибок сборки LVGL 9 + ESP-IDF
 
+## 0. Золотое правило: СНАЧАЛА посмотреть примеры, ПОТОМ писать код
+Перед написанием кода с LVGL/ESP-IDF обязательно изучить связанные примеры (подробно —
+раздел 0 навыка `skills/esp-idf-build-error-handling/SKILL.md`). Кратко для LVGL-специфики:
+1. **Примеры esp_lvgl_port** (`managed_components/espressif__esp_lvgl_port/`): README и
+   `test_apps/` — эталон инициализации панели, порта и блокировок LVGL.
+2. **Примеры lvgl**: `managed_components/lvgl__lvgl/examples/` (виджеты, шрифты) и `lvgl/docs/`.
+3. **Генерация шрифтов**: сверять флаги `lv_font_conv` с `lvgl/scripts/genexamplefont.sh`;
+   после генерации смотреть заголовок полученного .c — какой путь include он использует.
+4. **Заголовки IDF/LVGL по grep**: никогда не писать имена констант/макросов
+   (`LV_FONT_DECLARE`, `WIFI_EVENT_AP_START` и т.п.) по памяти — проверять фактическое наличие
+   в заголовках конкретной версии.
+5. **Другие ветки проекта**: `git grep` по origin/main, origin/lvgl9, origin/softap-webui —
+   многие задачи (шрифты, SPI, меню) уже решены там.
+
 ## 1. `fatal error: lvgl/lvgl.h: No such file or directory` (в шрифтах assets/fonts/*.c)
 **Причина:** сгенерированные `lv_font_conv` файлы по умолчанию делают
 `#include "lvgl/lvgl.h"`. В managed-компоненте `lvgl__lvgl` заголовок лежит в
@@ -107,6 +121,7 @@
 **Профилактика:** любой .c с сокетами сам включает полный набор `<sys/socket.h>+<netinet/in.h>+<unistd.h>`; никогда не полагаться на транзитивные инклюды компонентов IDF. Перед «исправлением» неизвестного идентификатора искать его определение в реальных заголовках нужной версии IDF (поиск по github.com/espressif/esp-idf на теге vX.Y), а не придумывать «похожее» имя.
 
 ## 7. Чек-лист перед push ветки с LVGL
+- [ ] **Посмотрены связанные примеры (раздел 0) ДО написания кода**
 - [ ] `.gitignore` содержит `build/` и `managed_components/`
 - [ ] define LV_LVGL_H_INCLUDE_SIMPLE есть и в CMakeLists, и в sdkconfig.defaults
 - [ ] шрифты в SRCS, нет #include *.c в ui.c

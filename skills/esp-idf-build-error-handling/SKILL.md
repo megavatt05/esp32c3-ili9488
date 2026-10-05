@@ -1,5 +1,28 @@
 # Навык: отработка типовых ошибок сборки и терминала ESP-IDF + LVGL
 
+## 0. Золотое правило: СНАЧАЛА посмотреть примеры, ПОТОМ писать код
+Прежде чем писать или править любой код в ESP-IDF/LVGL проекте, обязательно изучить связанные
+с ним примеры — это экономит часы на отладке типовых ошибок из этого навыка (почти все разделы 1–12
+возникли именно из-за кода «по памяти», без сверки с примерами).
+
+Порядок действий перед написанием кода:
+1. **Официальные примеры ESP-IDF** (`$IDF_PATH/examples/`) — искать по подсистеме:
+   - Wi-Fi SoftAP + HTTP-сервер: `examples/wifi/getting_started/softAP`, `examples/protocols/http_server/restful_server`
+   - DNS/сокеты: `examples/protocols/sockets/udp_client` (набор инклюдов BSD-сокетов — раздел 11)
+   - UART/консоль: `examples/peripherals/uart/uart_echo`, `examples/system/console`
+   - LVGL/дисплеи: managed-компонент `esp_lvgl_port` содержит `test_apps/` и README с эталонным кодом инициализации.
+2. **mdns** больше не в IDF — пример в репозитории `espressif/esp-idf-mdns` (папка `examples/`).
+3. **Заголовки своей версии IDF** — проверять фактическое существование символов:
+   `grep -rn "WIFI_EVENT_AP_START" $IDF_PATH/components/esp_wifi/include/` — никогда не писать
+   имена констант/функций по памяти (ошибки ESP_ERR_NOT_FIT, WIFI_AP_STARTUP, WIFI_EVENT_AP_STARTUP — разделы 3, 11).
+4. **Свой же проект** — посмотреть, как аналогичная задача решена в других ветках/файлах
+   (`git grep socket\(`, `git log --oneline -- main/softap.c`), чтобы не изобрести сломанное заново.
+5. **Совместимость версий** — при переходе на новую мажорную IDF сверяться с
+   migration guide (`docs.espressif.com → migration-guides/release-6.x/`): разбивка `driver` на
+   `esp_driver_*` (раздел 8), перенос mdns (раздел 9) описаны там официально.
+
+Только после изучения примера писать код, повторяя его структуру инклюдов, имён констант и зависимостей CMakeLists.
+
 ## 1. fatal error: lvgl/lvgl.h: No such file or directory
 Причина: сгенерированные lv_font_conv шрифты делают `#include "lvgl/lvgl.h"`, а в сборке ESP-IDF заголовок лежит как `lvgl.h` (компонент добавляет свой include-путь).
 Решение (в трёх слоях):
@@ -204,6 +227,7 @@ CMake Error at .../tools/cmake/build.cmake (message):
 Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
 
 ## Чек-лист перед push
+- [ ] **Посмотрены связанные примеры (раздел 0) ДО написания кода**
 - [ ] `idf.py build` проходит локально (или CI зелёный)
 - [ ] новые .c добавлены в SRCS, зависимости — в REQUIRES
 - [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
