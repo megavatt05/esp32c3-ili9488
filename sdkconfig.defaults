@@ -12,13 +12,13 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_SPI_MASTER_IN_IRAM=y
 CONFIG_SPI_MASTER_ISR_IN_IRAM=y
 
-# Compiler - size optimized for C3 (limited RAM)
+# Compiler
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
 # Logging
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# Disable radios
+# Disable radios (save RAM)
 CONFIG_ESP_WIFI_ENABLED=n
 CONFIG_BT_ENABLED=n
 
@@ -29,14 +29,20 @@ CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 
-# Fonts - enable Montserrat with Cyrillic support later via custom
+# Fonts
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
 
-# Performance
+# Performance monitors off
 CONFIG_LV_USE_PERF_MONITOR=n
 CONFIG_LV_USE_MEM_MONITOR=n
-CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+
+# !!! IMPORTANT FIX !!!
+# Disable IRAM placement of LV_ATTRIBUTE_FAST_MEM
+# On ESP-IDF 5.x/6.x + GCC 12+ this causes:
+#   "ignoring attribute 'section (".iram1.xx")' because it conflicts..."
+# See: https://github.com/lvgl/lvgl/issues/4391
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=n
