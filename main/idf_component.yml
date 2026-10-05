@@ -2,3 +2,6 @@ dependencies:
   atanisoft/esp_lcd_ili9488: "^1.1.1"
   lvgl/lvgl: "^9.2.0"
   espressif/esp_lvgl_port: "^2.4.1"
+  # mDNS вынесен из IDF в отдельный managed-компонент начиная с ESP-IDF 6.x.
+  # Без этой строки сборка падает: "Failed to resolve component 'mdns': unknown name".
+  espressif/mdns: "^1.2.0"

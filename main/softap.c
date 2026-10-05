@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
+#include "esp_timer.h"
 #include "mdns.h"
 
 #include "esp_http_server.h"
@@ -127,6 +128,10 @@ static esp_err_t start_dns_captive(void)
         ESP_LOGE(TAG, "Не удалось создать DNS-сокет");
         return ESP_FAIL;
     }
+    // Разрешаем повторное использование порта: иначе bind() может отказать,
+    // если mDNS/другая служба уже держит сокет на 0.0.0.0
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
         .sin_port = htons(53),
@@ -211,7 +216,21 @@ static esp_err_t status_handler(httpd_req_t *req)
 
 static esp_err_t captive_handler(httpd_req_t *req)
 {
-    // Ответы на проверки порталов Android/iOS/Windows — всегда редирект на главную
+    // Ответы на проверки порталов Android/iOS/Windows (gen_204, hotspot-detect и т.п.).
+    // ВАЖНО: чистый 302 Android-портал игнорирует (ожидает 204 от connectivitycheck),
+    // поэтому отдаём минимальную HTML-страницу с <meta refresh> — она срабатывает
+    // и в браузере, и в системном диалоге «Подключиться к Интернету».
+    const char *uri = req->uri;
+    if (strstr(uri, "hotspot-detect") || strstr(uri, "hwdetect") ||
+        strstr(uri, "hntest") || strstr(uri, "gen_204") ||
+        strstr(uri, "detectportal") || strstr(uri, "redirect")) {
+        httpd_resp_set_type(req, "text/html");
+        httpd_resp_sendstr(req,
+            "<html><head><meta http-equiv='refresh' content='0;url=http://"
+            AP_IP_ADDR "/'></head></html>");
+        return ESP_OK;
+    }
+    // Остальные неизвестные пути — честный 302 на главную
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://" AP_IP_ADDR "/");
     httpd_resp_send(req, NULL, 0);
