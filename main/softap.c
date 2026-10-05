@@ -33,12 +33,14 @@
 #include "esp_check.h"      // ESP_RETURN_ON_ERROR (в IDF 6.x не приходит транзитивно)
 #include "mdns.h"
 
-// Событие старта точки доступа во всех актуальных IDF (5.x и 6.x)
-// называется WIFI_EVENT_AP_STARTUP. Это значение enum wifi_event_t,
-// а НЕ макрос — поэтому любые #if defined(WIFI_...) проверки над ним
-// заведомо ложны и запрещены (именно так рождалась ошибка
-// 'WIFI_AP_STARTUP undeclared': несуществующее имя в мёртвой ветке
-// препроцессора всё равно компилировалось). Используем имя напрямую.
+// ВАЖНО (проверено по исходникам IDF v5.4 и v6.0):
+// событие старта точки доступа во ВСЕХ версиях называется
+// WIFI_EVENT_AP_START (enum wifi_event_t, esp_wifi_types_generic.h).
+// Имен WIFI_AP_STARTUP и WIFI_EVENT_AP_STARTUP НЕ СУЩЕСТВУЕТ ни в 5.x,
+// ни в 6.x — обе предыдущие ошибки ('WIFI_AP_STARTUP undeclared' и
+// 'WIFI_EVENT_AP_STARTUP undeclared; did you mean WIFI_EVENT_AP_START?')
+// были вызваны выдуманными именами. Компилятор сам подсказывает верное
+// имя в сообщении — его нужно читать и проверять в заголовках IDF.
 
 #include "esp_http_server.h"
 #include "softap.h"
@@ -61,12 +63,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t id, void *data)
 {
     if (base == WIFI_EVENT) {
-        // Единственно верное имя события во всех IDF 5.x/6.x —
-        // WIFI_EVENT_AP_STARTUP (значение enum из esp_wifi_types.h).
-        // Никаких #if defined() проверок: это enum, а не макрос,
-        // поэтому defined() всегда даёт ложь и уводил компилятор
-        // в ветку с несуществующим WIFI_AP_STARTUP.
-        if (id == WIFI_EVENT_AP_STARTUP) {
+        // Верное имя события во всех IDF 5.x/6.x — WIFI_EVENT_AP_START.
+        if (id == WIFI_EVENT_AP_START) {
             ESP_LOGI(TAG, "Точка доступа запущена");
         } else if (id == WIFI_EVENT_AP_STACONNECTED) {
             wifi_event_ap_staconnected_t *ev = (wifi_event_ap_staconnected_t *)data;

@@ -90,7 +90,7 @@
 
 **Причины:**
 1. IDF 6.x убрал транзитивные инклюды сетевых заголовков из esp_wifi.h/esp_netif.h — BSD-сокет API нужно подключать явно.
-2. Событие старта AP переименовано: `WIFI_AP_STARTUP` → `WIFI_EVENT_AP_STARTUP` (алиас удалён).
+2. Использовалось выдуманное имя события: НИ `WIFI_AP_STARTUP`, НИ `WIFI_EVENT_AP_STARTUP` не существует ни в IDF 5.x, ни в 6.x. Правильное имя — `WIFI_EVENT_AP_START` (enum `wifi_event_t`, `esp_wifi_types_generic.h`; проверено по исходникам v5.4 и v6.0). Компилятор подсказывает его: `did you mean 'WIFI_EVENT_AP_START'?`.
 3. Макросы `ESP_RETURN_ON_ERROR` требуют явного `#include "esp_check.h"`.
 
 **Решение:** в начало файла добавить:
@@ -101,15 +101,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "esp_check.h"
-#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
-#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
-#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
-#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
-#endif
 ```
-и использовать `WIFI_EVENT_AP_STARTUP` в обработчике событий. Системные сетевые инклюды размещать ДО lvgl-заголовков (в ui.c — до "ui.h"), чтобы избежать конфликтов макросов close/read/write с lwip-обёртками.
+и использовать `WIFI_EVENT_AP_START` в обработчике событий напрямую. НЕ оборачивать enum-константы в `#if defined()/#define`-алиасы: `defined()` для enum всегда ложен, а подмена имени без проверки по исходникам порождает новые ошибки (так случилось дважды: AP_STARTUP → AP_STARTUP(выдумано) → AP_START(верно)). Системные сетевые инклюды размещать ДО lvgl-заголовков (в ui.c — до "ui.h"), чтобы избежать конфликтов макросов close/read/write с lwip-обёртками.
 
-**Профилактика:** любой .c с сокетами сам включает полный набор `<sys/socket.h>+<netinet/in.h>+<unistd.h>`; никогда не полагаться на транзитивные инклюды компонентов IDF.
+**Профилактика:** любой .c с сокетами сам включает полный набор `<sys/socket.h>+<netinet/in.h>+<unistd.h>`; никогда не полагаться на транзитивные инклюды компонентов IDF. Перед «исправлением» неизвестного идентификатора искать его определение в реальных заголовках нужной версии IDF (поиск по github.com/espressif/esp-idf на теге vX.Y), а не придумывать «похожее» имя.
 
 ## 7. Чек-лист перед push ветки с LVGL
 - [ ] `.gitignore` содержит `build/` и `managed_components/`
