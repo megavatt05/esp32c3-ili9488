@@ -1,67 +1,47 @@
-# ESP32-C3 + ILI9488 (SPI) — ESP-IDF 6.0.3
+# ESP32-C3 + ILI9488 + LVGL 9
 
-Полный рабочий пример подключения дисплея **ILI9488** к **ESP32-C3 Super Mini** по SPI.
+Ветка с полноценным примером **LVGL 9**.
 
-## Распиновка (проверенная)
+## Особенности
 
-| Дисплей ILI9488     | ESP32-C3 (Super Mini) | Примечание                                      |
-|---------------------|-----------------------|-------------------------------------------------|
-| VCC / VDD           | 3.3V или 5V           | Смотри модуль (многие хотят 5V)                 |
-| GND                 | GND                   | Обязательно                                     |
-| CS                  | **GPIO5**             | Chip Select                                     |
-| RST / RESET         | **GPIO0**             | Можно соединить с EN/RESET платы                |
-| DC / RS             | **GPIO1**             | Data/Command                                    |
-| SDI / MOSI / SDA    | **GPIO4**             | Данные                                          |
-| SCK / CLK           | **GPIO2**             | Clock                                           |
-| LED / BL / BLK      | 3.3V                  | Подсветка (постоянно включена)                  |
-| SDO / MISO          | не подключать         | У ILI9488 часто проблема с Hi-Z                 |
+- Красивый тёмный UI со скруглёнными карточками
+- Поддержка кириллицы (шрифты Montserrat)
+- Плавная работа на ESP32-C3 (частичный буфер + double buffering)
+- SPI 40 МГц
+- Без Wi-Fi/BT для экономии RAM
 
-## Требования
+## Распиновка (та же)
 
-- ESP-IDF **6.0.3** (или совместимая 6.x)
-- Компонент `atanisoft/esp_lcd_ili9488` ≥ 1.1.1
+| Сигнал | GPIO |
+|--------|------|
+| SCK    | 2    |
+| MOSI   | 4    |
+| CS     | 5    |
+| DC     | 1    |
+| RST    | 0    |
+| BL     | 3.3V |
 
-## Быстрый старт
+## Сборка
 
 ```bash
-# Клонировать
-git clone https://github.com/megavatt05/esp32c3-ili9488.git
-cd esp32c3-ili9488
-
-# Установить цель
+git checkout lvgl9
 idf.py set-target esp32c3
-
-# Собрать
 idf.py build
-
-# Прошить и смотреть лог
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py -p PORT flash monitor
 ```
 
-## Что делает пример
+## Как добавить свой красивый шрифт с кириллицей
 
-1. Инициализирует SPI2
-2. Создаёт panel IO + ILI9488 панель (18-bit color)
-3. Заливает экран разными цветами в цикле
+1. Возьми TTF (например Inter, Roboto, Montserrat)
+2. Используй онлайн-конвертер: https://lvgl.io/tools/fontconverter
+   - Size: 18–24
+ * Bpp: 4 (рекомендуется)
+ * Range: `0x20-0x7F,0x400-0x4FF` (латиница + кириллица)
+3. Скачай `.c` файл
+4. Добавь в `main/` и объяви `LV_FONT_DECLARE(my_font);`
+5. Используй: `lv_obj_set_style_text_font(label, &my_font, 0);`
 
-## Структура проекта
+## Производительность
 
-```
-├── CMakeLists.txt
-├── idf_component.yml
-├── main/
-│   ├── CMakeLists.txt
-│   └── main.c
-├── .github/
-│   └── workflows/
-│       └── build.yml          # CI: проверка компиляции для ESP32-C3
-└── README.md
-```
-
-## CI
-
-GitHub Actions автоматически проверяет, что проект успешно компилируется под `esp32c3` на каждом push/PR.
-
-## Лицензия
-
-MIT
+На ESP32-C3 при 40 МГц SPI + partial buffer 30 строк интерфейс остаётся плавным.
+Если появятся артефакты — снизь `pclk_hz` до 30 МГц.
