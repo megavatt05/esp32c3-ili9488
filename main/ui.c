@@ -9,7 +9,16 @@
  */
 
 #include "ui.h"
+// Подключение LVGL: короткий путь "lvgl.h".
+// Макрос LV_LVGL_H_INCLUDE_SIMPLE определён в main/CMakeLists.txt через
+// target_compile_definitions — тот же путь используется в сгенерированных
+// шрифтах (assets/fonts/*.c), иначе сборка падает с ошибкой
+// "fatal error: lvgl/lvgl.h: No such file or directory".
+#ifdef LV_LVGL_H_INCLUDE_SIMPLE
 #include "lvgl.h"
+#else
+#include "lvgl/lvgl.h" // резервный путь, если define не передан
+#endif
 #include "esp_log.h"
 
 // ---------------------------------------------------------------------------

@@ -46,3 +46,7 @@ CONFIG_LV_USE_MEM_MONITOR=n
 #   "ignoring attribute 'section (".iram1.xx")' because it conflicts..."
 # See: https://github.com/lvgl/lvgl/issues/4391
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=n
+
+# LVGL include path: короткие #include "lvgl.h" в шрифтах и ui.c
+# (без этой опции lv_font_conv-файлы ищут "lvgl/lvgl.h" и сборка падает)
+CONFIG_LV_LVGL_H_INCLUDE_SIMPLE=y
