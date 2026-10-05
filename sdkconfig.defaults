@@ -53,3 +53,29 @@ CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=n
 # LVGL include path: короткие #include "lvgl.h" в шрифтах и ui.c
 # (без этой опции lv_font_conv-файлы ищут "lvgl/lvgl.h" и сборка падает)
 CONFIG_LV_LVGL_H_INCLUDE_SIMPLE=y
+
+# ====================== Сеть: фикс EMFILE (accept error 23) и стабильность SoftAP ======================
+# Больше сокетов/PCB под всплеск подключений телефона (HTTPS-пробобы, captive portal)
+CONFIG_LWIP_MAX_SOCKETS=24
+CONFIG_LWIP_MEMP_NUM_TCP_PCB=16
+CONFIG_LWIP_MEMP_NUM_TCP_PCB_LISTEN=8
+CONFIG_LWIP_TCP_SND_BUF=5760
+CONFIG_LWIP_TCP_WND=5760
+
+# HTTP-сервер: достаточно слотов под одновременные соединения
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+CONFIG_HTTPD_SERVER_TIMEOUT=5
+
+# Wi-Fi: SoftAP на фиксированном канале 6, только HT20 (20 МГц).
+# Убирает дребезг "wifi:new:<6,0>/<6,1>" и проблемы совместимости HT40.
+CONFIG_ESP_WIFI_SOFTAP_BEACON_MAX_LEN=752
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=1
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+
+# Консоль: UART0 (GPIO20/21) — ввод частоты SPI через терминал работает
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
