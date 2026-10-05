@@ -1,0 +1,21 @@
+# ESP32-C3 + ILI9488 example defaults
+
+CONFIG_IDF_TARGET="esp32c3"
+
+# FreeRTOS
+CONFIG_FREERTOS_HZ=1000
+
+# SPI Master
+CONFIG_SPI_MASTER_IN_IRAM=y
+
+# Compiler optimizations (optional, good for CI speed)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Log level
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+
+# Disable unnecessary features to speed up CI build
+CONFIG_ESP_WIFI_ENABLED=n
+CONFIG_BT_ENABLED=n
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
