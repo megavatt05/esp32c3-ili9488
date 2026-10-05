@@ -38,6 +38,49 @@
 - [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
 - [ ] комментарии на русском, сообщения лога — на русском
 
+## 8. fatal error: driver/uart.h: No such file or directory (ESP-IDF 6.x)
+Симптом:
+```
+main/uart_input.c:19:10: fatal error: driver/uart.h: No such file or directory
+```
+Причина: в ESP-IDF 6.x монолитный компонент `driver` разбит на подкомпоненты
+(`esp_driver_uart`, `esp_driver_gpio`, `esp_driver_spi`, ...). Заголовок
+`driver/uart.h` физически живёт в `esp_driver_uart`, и одного `REQUIRES driver`
+больше недостаточно — include-путь подкомпонента не пробрасывается.
+Решение: в `main/CMakeLists.txt` перечислять конкретные драйвер-компоненты:
+```cmake
+REQUIRES      esp_driver_gpio esp_driver_spi esp_driver_uart
+              esp_hw_support esp_timer vfs
+PRIV_REQUIRES esp_lcd esp_partition app_update esp_wifi esp_netif esp_event
+```
+Правило: при переходе на IDF 6.x все зависимости вида `driver/xxx.h` заменять на
+соответствующий `esp_driver_xxx`.
+
+## 9. CMake Error: Failed to resolve component 'mdns' ... unknown name (ветка softap-webui)
+Причина: mDNS удалён из дерева ESP-IDF 6.x и распространяется как managed-компонент.
+Решение:
+1. `main/idf_component.yml`:
+   ```yaml
+   dependencies:
+     espressif/mdns: "^1.2.0"
+   ```
+2. В `main/CMakeLists.txt` разрешать имя динамически (`espressif__mdns` для 6.x,
+   `mdns` для 5.x). ВАЖНО: managed-компоненты лежат в `<корень проекта>/managed_components`,
+   а НЕ рядом с `main/`; проверять нужно оба расположения плюс дерево IDF, иначе
+   EXISTS всегда false и в REQUIRES попадает голое `mdns` → та же ошибка.
+3. После изменений обязательно `idf.py fullclean` (stale build-дир кэширует старый список компонентов).
+
+## 10. Страница captive portal не открывается автоматически на телефоне
+(актуально для ветки softap-webui, ESP32C3-DGW-SA1)
+Причины и решения:
+- Android/iOS проверяют connectivity-эндпоинты; обычный HTTP 302 часто игнорируется.
+  Нужен HTML-ответ с `<meta http-equiv="refresh">` на страницу портала;
+- DNS-сервер на порту 53 должен отвечать на ЛЮБОЙ запрос адресом AP (192.168.4.1),
+  сокет создавать с `SO_REUSEADDR`;
+- открыть системный диалог «Добавить сеть Wi-Fi» через Intent можно только с
+  разрешения пользователя — автозапуск страницы ограничивается подсказкой в SSID
+  и редиректом после подключения.
+
 ## 7. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
 Симптом: сборка падает ЕЩЁ до компиляции, на этапе `Processing dependencies`:
 ```
