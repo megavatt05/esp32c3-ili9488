@@ -175,7 +175,8 @@ cc1.exe: all warnings being treated as errors
 
 **Причины (три независимые):**
 1. **Сетевые заголовки не подтягиваются транзитивно.** В IDF 6.x `esp_wifi.h`/`esp_netif.h` больше не включают `<sys/socket.h>` и `<netinet/in.h>` косвенно. Все BSD-сокет API (`socket/bind/recvfrom/sendto/setsockopt/close`, типы `sockaddr_in`, `socklen_t`, константы `AF_INET/SOCK_DGRAM/IPPROTO_UDP/SOL_SOCKET/SO_REUSEADDR/INADDR_ANY`) требуют явных инклюдов.
-2. **Переименование события Wi-Fi.** В IDF 6.x событие старта точки доступа называется `WIFI_EVENT_AP_STARTUP`; старый алиас `WIFI_AP_STARTUP` удалён из `esp_wifi_types.h`.
+2. **Неверное имя события Wi-Fi + неудачный guard.** Событие старта AP называется `WIFI_EVENT_AP_STARTUP` во всех IDF 5.x/6.x. Имени `WIFI_AP_STARTUP` не существовало никогда (это значение enum, а не макрос). Первая попытка «совместимости» через `#if defined(...)` усугубила ошибку: `defined()` над enum-константой всегда ложен, и компилятор уходил в `#else`-ветку с несуществующим именем — ошибка повторялась даже после пуша фикса.
+
 3. **Макросы esp_check.h не видны.** `ESP_RETURN_ON_ERROR` живёт в `esp_check.h`, который в 6.x не включается транзитивно через `esp_log.h`/`nvs_flash.h`.
 
 **Решение (в `main/softap.c`):**
@@ -187,14 +188,11 @@ cc1.exe: all warnings being treated as errors
 #include <arpa/inet.h>
 #include "esp_check.h"      // ESP_RETURN_ON_ERROR
 
-// Совместимость имени события AP-старта между IDF 5.x/6.x:
-#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
-#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
-#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
-#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
-#endif
-// в обработчике: if (id == WIFI_EVENT_AP_STARTUP) { ... }
+// Никаких #if defined() вокруг enum-констант! Используем имя напрямую:
+if (id == WIFI_EVENT_AP_STARTUP) { ... }
 ```
+Правило совместимости версий: проверять через `__has_include` (заголовки) или
+`ESP_IDF_VERSION_MAJOR/MINOR` из `esp_idf_version.h`, но НЕ через `defined()` для enum.
 
 **Дополнительно (защита от неопределённого поведения в других TU):** в `main/ui.c` системные сетевые заголовки размещены ДО `#include "ui.h"` (который тянет LVGL), т.к. в IDF 6.x lvgl.h может подключать lwip-обёртки, конфликтующие с `<unistd.h>` при обратном порядке.
 
