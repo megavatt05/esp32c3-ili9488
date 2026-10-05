@@ -8,25 +8,17 @@ on:
 
 jobs:
   build:
-    name: Build for esp32c3
+    name: Build for esp32c3 (IDF 6.0.3)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup ESP-IDF
+      - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.3
           target: esp32c3
           path: '.'
-
-      # The action above already runs idf.py build.
-      # Additional explicit build step (optional, for clarity):
-      - name: Explicit build check
-        run: |
-          . $HOME/esp/esp-idf/export.sh || true
-          idf.py set-target esp32c3
-          idf.py build
-        working-directory: .
+          command: idf.py set-target esp32c3 && idf.py build
