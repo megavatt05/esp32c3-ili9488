@@ -1,2 +1,67 @@
-# esp32c3-ili9488
-ESP-IDF 6.0.3 example: ILI9488 SPI display on ESP32-C3 Super Mini with recommended pinout
+# ESP32-C3 + ILI9488 (SPI) — ESP-IDF 6.0.3
+
+Полный рабочий пример подключения дисплея **ILI9488** к **ESP32-C3 Super Mini** по SPI.
+
+## Распиновка (проверенная)
+
+| Дисплей ILI9488     | ESP32-C3 (Super Mini) | Примечание                                      |
+|---------------------|-----------------------|-------------------------------------------------|
+| VCC / VDD           | 3.3V или 5V           | Смотри модуль (многие хотят 5V)                 |
+| GND                 | GND                   | Обязательно                                     |
+| CS                  | **GPIO5**             | Chip Select                                     |
+| RST / RESET         | **GPIO0**             | Можно соединить с EN/RESET платы                |
+| DC / RS             | **GPIO1**             | Data/Command                                    |
+| SDI / MOSI / SDA    | **GPIO4**             | Данные                                          |
+| SCK / CLK           | **GPIO2**             | Clock                                           |
+| LED / BL / BLK      | 3.3V                  | Подсветка (постоянно включена)                  |
+| SDO / MISO          | не подключать         | У ILI9488 часто проблема с Hi-Z                 |
+
+## Требования
+
+- ESP-IDF **6.0.3** (или совместимая 6.x)
+- Компонент `atanisoft/esp_lcd_ili9488` ≥ 1.1.1
+
+## Быстрый старт
+
+```bash
+# Клонировать
+git clone https://github.com/megavatt05/esp32c3-ili9488.git
+cd esp32c3-ili9488
+
+# Установить цель
+idf.py set-target esp32c3
+
+# Собрать
+idf.py build
+
+# Прошить и смотреть лог
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+## Что делает пример
+
+1. Инициализирует SPI2
+2. Создаёт panel IO + ILI9488 панель (18-bit color)
+3. Заливает экран разными цветами в цикле
+
+## Структура проекта
+
+```
+├── CMakeLists.txt
+├── idf_component.yml
+├── main/
+│   ├── CMakeLists.txt
+│   └── main.c
+├── .github/
+│   └── workflows/
+│       └── build.yml          # CI: проверка компиляции для ESP32-C3
+└── README.md
+```
+
+## CI
+
+GitHub Actions автоматически проверяет, что проект успешно компилируется под `esp32c3` на каждом push/PR.
+
+## Лицензия
+
+MIT
