@@ -120,14 +120,16 @@ error: implicit declaration of function 'ESP_RETURN_ON_ERROR'
 #include <arpa/inet.h>
 #include "esp_check.h"        // ESP_RETURN_ON_ERROR
 ```
-Совместимость имени события 5.x/6.x:
+Правильное использование имени события (ВАЖНО — типичная ошибка №2):
 ```c
-#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
-#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
-#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
-#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
-#endif
+if (id == WIFI_EVENT_AP_STARTUP) { ... }   // единственно верное имя
 ```
+НЕЛЬЗЯ оборачивать enum-константы в `#if defined(...)`: значения enum — это НЕ макросы,
+`defined(WIFI_EVENT_AP_STARTUP)` всегда даёт ложь, и компилятор уходит в `#else`-ветку
+с несуществующим именем. Ровно так и возникал повторный `'WIFI_AP_STARTUP' undeclared`
+в мёртвой ветке препроцессора. Правило: для enum-констант IDF использовать имя напрямую,
+проверки совместимости допустимы только через `__has_include` (заголовки) или
+`ESP_IDF_VERSION_MAJOR/MINOR` (`esp_idf_version.h`).
 Плюс порядок инклюдов в TU с LVGL: системные сетевые заголовки размещать ДО lvgl-заголовков
 (в IDF 6.x lvgl.h может тянуть lwip-обёртки, конфликтующие с `<unistd.h>` при обратном порядке).
 
