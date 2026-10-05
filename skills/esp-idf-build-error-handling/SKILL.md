@@ -1,5 +1,28 @@
 # Навык: отработка типовых ошибок сборки и терминала ESP-IDF + LVGL
 
+## 0. Золотое правило: СНАЧАЛА посмотреть примеры, ПОТОМ писать код
+Прежде чем писать или править любой код в ESP-IDF/LVGL проекте, обязательно изучить связанные
+с ним примеры — это экономит часы на отладке типовых ошибок из этого навыка (почти все разделы 1–12
+возникли именно из-за кода «по памяти», без сверки с примерами).
+
+Порядок действий перед написанием кода:
+1. **Официальные примеры ESP-IDF** (`$IDF_PATH/examples/`) — искать по подсистеме:
+   - Wi-Fi SoftAP + HTTP-сервер: `examples/wifi/getting_started/softAP`, `examples/protocols/http_server/restful_server`
+   - DNS/сокеты: `examples/protocols/sockets/udp_client` (набор инклюдов BSD-сокетов — раздел 11)
+   - UART/консоль: `examples/peripherals/uart/uart_echo`, `examples/system/console`
+   - LVGL/дисплеи: managed-компонент `esp_lvgl_port` содержит `test_apps/` и README с эталонным кодом инициализации.
+2. **mdns** больше не в IDF — пример в репозитории `espressif/esp-idf-mdns` (папка `examples/`).
+3. **Заголовки своей версии IDF** — проверять фактическое существование символов:
+   `grep -rn "WIFI_EVENT_AP_START" $IDF_PATH/components/esp_wifi/include/` — никогда не писать
+   имена констант/функций по памяти (ошибки ESP_ERR_NOT_FIT, WIFI_AP_STARTUP, WIFI_EVENT_AP_STARTUP — разделы 3, 11).
+4. **Свой же проект** — посмотреть, как аналогичная задача решена в других ветках/файлах
+   (`git grep socket\(`, `git log --oneline -- main/softap.c`), чтобы не изобрести сломанное заново.
+5. **Совместимость версий** — при переходе на новую мажорную IDF сверяться с
+   migration guide (`docs.espressif.com → migration-guides/release-6.x/`): разбивка `driver` на
+   `esp_driver_*` (раздел 8), перенос mdns (раздел 9) описаны там официально.
+
+Только после изучения примера писать код, повторяя его структуру инклюдов, имён констант и зависимостей CMakeLists.
+
 ## 1. fatal error: lvgl/lvgl.h: No such file or directory
 Причина: сгенерированные lv_font_conv шрифты делают `#include "lvgl/lvgl.h"`, а в сборке ESP-IDF заголовок лежит как `lvgl.h` (компонент добавляет свой include-путь).
 Решение (в трёх слоях):
@@ -107,8 +130,10 @@ error: implicit declaration of function 'ESP_RETURN_ON_ERROR'
 Причины:
 1. В IDF 6.x сетевые заголовки **не подключаются транзитивно** через `esp_wifi.h`/`lwip` — файл,
    использующий сокеты, обязан включать их сам;
-2. перечислитель события AP в актуальных заголовках — `WIFI_EVENT_AP_STARTUP` (старое короткое
-   имя `WIFI_AP_STARTUP` не определено);
+2. использовалось **выдуманное имя события**: ни `WIFI_AP_STARTUP`, ни `WIFI_EVENT_AP_STARTUP`
+   не существует НИ в IDF 5.x, НИ в 6.x. Правильное имя — `WIFI_EVENT_AP_START`
+   (проверено по исходникам v5.4 и v6.0: enum `wifi_event_t`, `esp_wifi_types_generic.h`).
+   Компилятор прямо подсказывает его: `did you mean 'WIFI_EVENT_AP_START'?`;
 3. `ESP_RETURN_ON_ERROR` живёт в `esp_check.h`, который тоже надо включить явно.
 
 Решение (полный набор инклюдов для любого socket-кода):
@@ -122,14 +147,19 @@ error: implicit declaration of function 'ESP_RETURN_ON_ERROR'
 ```
 Правильное использование имени события (ВАЖНО — типичная ошибка №2):
 ```c
-if (id == WIFI_EVENT_AP_STARTUP) { ... }   // единственно верное имя
+if (id == WIFI_EVENT_AP_START) { ... }   // единственно верное имя во всех IDF 5.x/6.x
 ```
 НЕЛЬЗЯ оборачивать enum-константы в `#if defined(...)`: значения enum — это НЕ макросы,
-`defined(WIFI_EVENT_AP_STARTUP)` всегда даёт ложь, и компилятор уходит в `#else`-ветку
+`defined(WIFI_EVENT_AP_START)` всегда даёт ложь, и компилятор уходит в `#else`-ветку
 с несуществующим именем. Ровно так и возникал повторный `'WIFI_AP_STARTUP' undeclared`
 в мёртвой ветке препроцессора. Правило: для enum-констант IDF использовать имя напрямую,
 проверки совместимости допустимы только через `__has_include` (заголовки) или
 `ESP_IDF_VERSION_MAJOR/MINOR` (`esp_idf_version.h`).
+ГЛАВНОЕ ПРАВИЛО ИСПРАВЛЕНИЙ: перед заменой «неизвестного» имени на «правильное» —
+проверить подсказку компилятора (`did you mean ...`) и найти символ в реальных заголовках
+IDF (github.com/espressif/esp-idf → поиск по тегу версии). Предыдущая «фикса»
+`WIFI_AP_STARTUP → WIFI_EVENT_AP_STARTUP` сама была выдуманным именем и породила
+повторную ошибку — подмена без проверки по исходникам запрещена.
 Плюс порядок инклюдов в TU с LVGL: системные сетевые заголовки размещать ДО lvgl-заголовков
 (в IDF 6.x lvgl.h может тянуть lwip-обёртки, конфликтующие с `<unistd.h>` при обратном порядке).
 
@@ -197,6 +227,7 @@ CMake Error at .../tools/cmake/build.cmake (message):
 Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
 
 ## Чек-лист перед push
+- [ ] **Посмотрены связанные примеры (раздел 0) ДО написания кода**
 - [ ] `idf.py build` проходит локально (или CI зелёный)
 - [ ] новые .c добавлены в SRCS, зависимости — в REQUIRES
 - [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
