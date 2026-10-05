@@ -32,12 +32,6 @@
 4. **Консоль «съедает» символы**: ROM-загрузчик и log-поток делят UART0; если драйвер уже установлен консолью, повторный install вернёт ESP_ERR_INVALID_STATE — это штатно, читать можно.
 5. **Прошивка не пересобрана**: sdkconfig.defaults применяется только при УДАЛЁННОМ sdkconfig — сделать `idf.py fullclean` + удалить `sdkconfig`, затем build.
 
-## Чек-лист перед push
-- [ ] `idf.py build` проходит локально (или CI зелёный)
-- [ ] новые .c добавлены в SRCS, зависимости — в REQUIRES
-- [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
-- [ ] комментарии на русском, сообщения лога — на русском
-
 ## 8. fatal error: driver/uart.h: No such file or directory (ESP-IDF 6.x)
 Симптом:
 ```
@@ -100,7 +94,85 @@ endif()
   разрешения пользователя — автозапуск страницы ограничивается подсказкой в SSID
   и редиректом после подключения.
 
-## 7. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
+## 11. Ошибки BSD-сокетов и Wi-Fi событий в softap.c (ESP-IDF 6.x)
+Симптом (одна сборка, много ошибок):
+```
+error: 'WIFI_AP_STARTUP' undeclared
+error: storage size of 'src' isn't known          (struct sockaddr_in)
+error: unknown type name 'socklen_t'
+error: implicit declaration of function 'recvfrom'/'sendto'/'socket'/'bind'/'setsockopt'
+error: 'AF_INET'/'SOCK_DGRAM'/'INADDR_ANY' undeclared
+error: implicit declaration of function 'ESP_RETURN_ON_ERROR'
+```
+Причины:
+1. В IDF 6.x сетевые заголовки **не подключаются транзитивно** через `esp_wifi.h`/`lwip` — файл,
+   использующий сокеты, обязан включать их сам;
+2. перечислитель события AP в актуальных заголовках — `WIFI_EVENT_AP_STARTUP` (старое короткое
+   имя `WIFI_AP_STARTUP` не определено);
+3. `ESP_RETURN_ON_ERROR` живёт в `esp_check.h`, который тоже надо включить явно.
+
+Решение (полный набор инклюдов для любого socket-кода):
+```c
+#include <unistd.h>           // close
+#include <sys/socket.h>       // socket, bind, recvfrom, sendto, setsockopt, socklen_t, SOL_SOCKET, SO_REUSEADDR
+#include <sys/types.h>        // ssize_t
+#include <netinet/in.h>       // sockaddr_in, AF_INET, IPPROTO_UDP, htons/htonl, INADDR_ANY
+#include <arpa/inet.h>
+#include "esp_check.h"        // ESP_RETURN_ON_ERROR
+```
+Совместимость имени события 5.x/6.x:
+```c
+#if !defined(WIFI_EVENT_AP_STARTUP) && defined(WIFI_AP_STARTUP)
+#define WIFI_EVENT_AP_STARTUP   WIFI_AP_STARTUP
+#elif !defined(WIFI_AP_STARTUP) && defined(WIFI_EVENT_AP_STARTUP)
+#define WIFI_AP_STARTUP         WIFI_EVENT_AP_STARTUP
+#endif
+```
+Плюс порядок инклюдов в TU с LVGL: системные сетевые заголовки размещать ДО lvgl-заголовков
+(в IDF 6.x lvgl.h может тянуть lwip-обёртки, конфликтующие с `<unistd.h>` при обратном порядке).
+
+---
+
+## MCP-серверы Espressif: использование в работе над проектом
+
+### Статус проверки (октябрь 2026)
+В текущем рабочем окружении (isolated Linux-контейнер без ESP-IDF и без последовательных портов)
+MCP-серверы Espressif **не используются**: они требуют локальной установки IDF
+(`C:/esp/v6.0.3/esp-idf`) и физического устройства. Проверено: pip-пакетов
+`espressif-mcp`, `esp-idf-mcp-server`, `idf-mcp` в PyPI нет — сервер распространяется иначе.
+
+### Что доступно официально от Espressif
+1. **`idf_claude_skill`** (https://github.com/espressif/idf_claude_skill) — официальный репозиторий
+   навыков+MCP для ESP-IDF v6.x. Устанавливается как skill-пакет в Claude Code / совместимые агенты:
+   ```bash
+   git clone https://github.com/espressif/idf_claude_skill.git
+   cd idf_claude_skill && ./install.sh --path <каталог-агента>
+   # или вручную: скопировать skills/ в ~/.claude/skills, добавить MCP-сервер в конфиг агента
+   ```
+   После установки агент получает инструменты: разбор ошибок сборки idf.py, миграция 5.x→6.x,
+   поиск по API-докам, анализ размера прошивки.
+2. **MCP-сервер idf.py** (встроен в IDF v6.x начиная с 6.0):
+   ```bash
+   idf.py mcp server            # stdio-транспорт
+   # в .mcp.json клиента:
+   { "mcpServers": { "esp-idf": { "command": "idf.py", "args": ["mcp", "server"] } } }
+   ```
+   Даёт агенту инструменты build/flash/monitor, чтение логов, dfu, eFuse и пр. Работает только там,
+   где установлена IDF и виден COM-порт.
+3. **ESP-MCP (community)** — сторонние обёртки над idf.py/pyserial; использовать только если
+   официальные недоступны.
+
+### Как применять в этом проекте (рекомендация)
+- На машине разработчика (Windows, `C:\Espressif`, IDF 6.0.3) подключить `idf.py mcp server`
+  к IDE-агенту → агент сам запускает `build`, читает полный лог ошибки и сверяется с этим навыком;
+- Логику «упал build → открыть ERRORS.md → найти номер раздела → применить решение» этот навык
+  полностью покрывает и без MCP (см. разделы 1–12), поэтому MCP — ускорение, а не зависимость;
+- При обновлении IDF проверять `idf.py --version` и changelog миграции:
+  https://docs.espressif.com/projects/esp-idf/en/stable/esp32/migration-guides/release-6.x/
+
+---
+
+## 12. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
 Симптом: сборка падает ЕЩЁ до компиляции, на этапе `Processing dependencies`:
 ```
 CMake Error at .../tools/cmake/build.cmake (message):
@@ -121,3 +193,11 @@ CMake Error at .../tools/cmake/build.cmake (message):
 #endif
 ```
 Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
+
+## Чек-лист перед push
+- [ ] `idf.py build` проходит локально (или CI зелёный)
+- [ ] новые .c добавлены в SRCS, зависимости — в REQUIRES
+- [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
+- [ ] socket-код содержит полный набор инклюдов (раздел 11)
+- [ ] комментарии на русском, сообщения лога — на русском
+- [ ] свежая ошибка добавлена в ERRORS.md и в этот навык

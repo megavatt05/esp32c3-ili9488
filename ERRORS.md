@@ -15,6 +15,7 @@
 | 8 | Переполнение flash из-за кириллических шрифтов (~1 МБ) | lvgl9 | ⚠️ профилактика |
 | 9 | IRAM conflict (`ignoring attribute section`) | lvgl9 | ⚠️ профилактика |
 | 10 | Captive portal не открывается автоматически на телефоне | softap-webui | ✅ исправлено |
+| 11 | `WIFI_AP_STARTUP` undeclared + BSD-сокеты не объявлены в softap.c | softap-webui | ✅ исправлено |
 
 ---
 
@@ -159,10 +160,32 @@ endif()
 
 ---
 
+---
+
+## Инструментарий: MCP-серверы Espressif
+
+В данном окружении разработки MCP-серверы Espressif **не подключены и не используются**
+(нет локальной ESP-IDF и COM-портов). Проверено: pip-пакетов `espressif-mcp`,
+`esp-idf-mcp-server`, `idf-mcp` в PyPI не существует.
+
+Что можно подключить на машине разработчика (Windows + IDF 6.0.3):
+1. **Встроенный MCP-сервер idf.py** (IDF ≥ 6.0): `idf.py mcp server` (stdio), конфиг клиента:
+   ```json
+   { "mcpServers": { "esp-idf": { "command": "idf.py", "args": ["mcp", "server"] } } }
+   ```
+2. **Официальный пакет навыков**: https://github.com/espressif/idf_claude_skill
+   (разбор ошибок сборки, миграция 5.x→6.x, анализ размера прошивки).
+
+Порядок применения при падении сборки: лог ошибки → таблица выше → соответствующий раздел
+навыка `skills/esp-idf-build-error-handling/SKILL.md`. Подробное описание MCP — там же.
+
+---
+
 ## Общие правила (чек-лист перед push)
 - [ ] `idf.py build` проходит локально (или CI зелёный) ДО пуша;
 - [ ] после правки `REQUIRES`/`sdkconfig.defaults` — `idf.py fullclean` (+ удалить `sdkconfig`, если менялись defaults);
 - [ ] в `REQUIRES` только реальные компоненты; для IDF 6.x — `esp_driver_*` вместо `driver`;
+- [ ] socket-код: полный набор инклюдов `<sys/socket.h>/<netinet/in.h>/<unistd.h>` + `esp_check.h` (см. п.11);
 - [ ] новые .c добавлены в `SRCS`, управляемые зависимости — в `main/idf_component.yml`;
 - [ ] `.gitignore` содержит `build/`, `managed_components/`, `sdkconfig`, `dependencies.lock`;
 - [ ] комментарии и сообщения лога — на русском;
