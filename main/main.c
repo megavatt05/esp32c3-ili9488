@@ -53,7 +53,7 @@ static esp_lcd_panel_io_handle_t io_handle = NULL;
  * Проверка свободного места в flash-разделе приложения.
  * Сравнивает размер текущей прошивки с размером раздела app и выводит
  * процент заполнения. Возвращает ESP_OK, если место ещё есть (>5%),
- * иначе ESP_ERR_NOT_FIT — прошивка почти заполнила раздел.
+ * иначе ESP_ERR_INVALID_SIZE — прошивка почти заполнила раздел.
  */
 static esp_err_t check_flash_space(void)
 {
@@ -93,7 +93,7 @@ static esp_err_t check_flash_space(void)
 
     if (free_bytes < part_size / 20) { // меньше 5% свободно
         ESP_LOGW(TAG, "ВНИМАНИЕ: в flash-разделе осталось менее 5%% места!");
-        return ESP_ERR_NOT_FIT;
+        return ESP_ERR_INVALID_SIZE;
     }
     ESP_LOGI(TAG, "Место в flash в достатке.");
     return ESP_OK;
