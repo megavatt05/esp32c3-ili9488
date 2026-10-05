@@ -17,7 +17,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
-#include "esp_vfs_dev.h"
+// Совместимость версий ESP-IDF:
+//  - IDF <= 5.3: esp_vfs_dev_uart_use_driver() объявлена в esp_vfs_dev.h (компонент vfs);
+//  - IDF >= 6.0: заголовок esp_vfs_dev.h УДАЛЁН, функция перенесена в driver/uart_vfs.h.
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"   // ESP-IDF 6.x
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"       // ESP-IDF 5.x
+#endif
 #include "esp_log.h"
 #include "uart_input.h"
 

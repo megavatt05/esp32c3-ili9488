@@ -37,3 +37,25 @@
 - [ ] новые .c добавлены в SRCS, зависимости — в REQUIRES
 - [ ] CONFIG-флаги, влияющие на ввод/консоль, внесены в sdkconfig.defaults
 - [ ] комментарии на русском, сообщения лога — на русском
+
+## 7. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
+Симптом: сборка падает ЕЩЁ до компиляции, на этапе `Processing dependencies`:
+```
+CMake Error at .../tools/cmake/build.cmake (message):
+  Failed to resolve component 'esp_vfs_dev' required by component 'main': unknown name.
+```
+Причина: `esp_vfs_dev` — это НЕ компонент ESP-IDF, а всего лишь заголовок/модуль
+внутри компонента `vfs`. Указывать его в `REQUIRES` нельзя.
+Решение:
+- в `main/CMakeLists.txt` заменить `esp_vfs_dev` на `vfs` (для IDF 5.x);
+- в IDF 6.0 модуль esp_vfs_dev упразднён полностью, а `esp_vfs_dev_uart_use_driver()`
+  перенесена в `driver/uart_vfs.h` (компонент `driver`) — в REQUIRES достаточно `driver`;
+- для совместимости 5.x/6.x использовать guarded include:
+```c
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"   // ESP-IDF 6.x
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"       // ESP-IDF 5.x
+#endif
+```
+Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
