@@ -21,7 +21,4 @@ jobs:
           esp_idf_version: v6.0.3
           target: esp32c3
           path: '.'
-          # set-target is needed only on first run; build will use IDF_TARGET from the action
-          command: |
-            idf.py set-target esp32c3
-            idf.py build
+          command: "idf.py set-target esp32c3 && idf.py build"
