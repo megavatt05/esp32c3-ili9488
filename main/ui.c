@@ -8,6 +8,7 @@
  *   Затем положите foto.c в assets/images/ и включите его в CMakeLists.txt
  */
 
+#include <stdio.h>
 #include "ui.h"
 // Подключение LVGL: короткий путь "lvgl.h".
 // Макрос LV_LVGL_H_INCLUDE_SIMPLE определён в main/CMakeLists.txt через
@@ -20,6 +21,7 @@
 #include "lvgl/lvgl.h" // резервный путь, если define не передан
 #endif
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
 
 // ---------------------------------------------------------------------------
 // Кастомные шрифты с поддержкой кириллицы
@@ -36,6 +38,11 @@ LV_FONT_DECLARE(font_montserrat_24); // Крупный текст, 24 px
 LV_FONT_DECLARE(font_notosans_28);   // Заголовок, 28 px
 
 static const char *TAG = "UI";
+
+// Объекты экрана, используемые веб-управлением (объявлены в начале файла,
+// чтобы быть видимыми и в ui_init(), и в функциях SoftAP в конце файла)
+static lv_obj_t *s_main_screen = NULL;    // основной экран демо (для возврата с веб-баннера)
+static lv_obj_t *s_ap_ssid_label = NULL;  // метка SSID на баннере точки доступа
 
 #define FONT_BODY  &font_inter_16      // Шрифт основного текста
 #define FONT_VALUE &font_roboto_20     // Шрифт значений
@@ -96,6 +103,7 @@ void ui_init(void)
     ESP_LOGI(TAG, "Создание UI...");
 
     lv_obj_t *scr = lv_screen_active();
+    s_main_screen = scr;   // запоминаем основной экран для возврата с веб-демо
     create_background(scr);
 
     // Заголовок
@@ -161,4 +169,80 @@ void ui_init(void)
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -16);
 
     ESP_LOGI(TAG, "UI создан");
+}
+
+/* ================= Веб-управление (SoftAP) ================= */
+
+// Ссылки на объекты, доступные из обработчиков HTTP-запросов
+static lv_obj_t *s_web_screen = NULL;    // отдельный экран веб-демо
+static bool s_web_screen_created = false;
+
+/**
+ * @brief Установить цвет фона. Если пользователь уже открыл веб-экран —
+ * перекрашивается он, иначе фон основного экрана.
+ * Вызывается из задачи HTTP-сервера, поэтому блокирует LVGL через esp_lvgl_port.
+ */
+void ui_set_bg_color(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (!lvgl_port_lock(100)) {
+        ESP_LOGW(TAG, "Не удалось взять блокировку LVGL для смены цвета");
+        return;
+    }
+
+    lv_color_t col = lv_color_hex(((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+
+    if (s_web_screen_created) {
+        // Перекрашиваем веб-экран
+        lv_obj_set_style_bg_color(s_web_screen, col, 0);
+    } else {
+        // Меняем фон активного (основного) экрана
+        lv_obj_set_style_bg_color(lv_screen_active(), col, 0);
+        lv_obj_set_style_bg_opa(lv_screen_active(), LV_OPA_COVER, 0);
+    }
+
+    lvgl_port_unlock();
+}
+
+/**
+ * @brief Показать/скрыть баннер точки доступа на экране.
+ * Вызывается из обработчика событий Wi-Fi при подключении клиента.
+ */
+void ui_show_ap_banner(bool show, const char *ssid)
+{
+    if (!lvgl_port_lock(100)) {
+        ESP_LOGW(TAG, "Блокировка LVGL недоступна (баннер AP)");
+        return;
+    }
+
+    if (show) {
+        if (!s_web_screen_created) {
+            s_web_screen = lv_obj_create(NULL);   // новый экран (screen)
+            lv_obj_remove_style_all(s_web_screen);
+            lv_obj_set_style_bg_color(s_web_screen, lv_color_hex(0x111827), 0);
+            lv_obj_set_style_bg_opa(s_web_screen, LV_OPA_COVER, 0);
+            s_web_screen_created = true;
+
+            lv_obj_t *t = lv_label_create(s_web_screen);
+            lv_label_set_text(t, "SOFTAP ONLINE");
+            lv_obj_set_style_text_font(t, FONT_TITLE, 0);
+            lv_obj_set_style_text_color(t, lv_color_hex(0x4fc3f7), 0);
+            lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 40);
+
+            s_ap_ssid_label = lv_label_create(s_web_screen);
+            lv_obj_set_style_text_font(s_ap_ssid_label, FONT_VALUE, 0);
+            lv_obj_set_style_text_color(s_ap_ssid_label, lv_color_hex(0xe5e7eb), 0);
+            lv_obj_align(s_ap_ssid_label, LV_ALIGN_BOTTOM_MID, 0, -40);
+        }
+        if (ssid && s_ap_ssid_label) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "SSID: %s\nhttp://192.168.4.1", ssid);
+            lv_label_set_text(s_ap_ssid_label, buf);
+        }
+        lv_screen_load(s_web_screen);
+    } else if (s_web_screen_created && s_main_screen) {
+        // Возврат на основной экран демо
+        lv_screen_load(s_main_screen);
+    }
+
+    lvgl_port_unlock();
 }

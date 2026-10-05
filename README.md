@@ -1,88 +1,38 @@
-# ESP32-C3 + ILI9488 + LVGL 9
+# ESP32C3-DGW-SA1 — Display Gateway SoftAP Edition
 
-Красивый пример с поддержкой кириллицы, скруглённых шрифтов и структурой для ассетов.
+**Инженерное название проекта:** `ESP32C3-DGW-SA1` (Display GateWay — SoftAP, версия 1)
 
-## Структура проекта
+Прошивка для ESP32-C3 + дисплея ILI9488 (SPI, 320×480) на LVGL 9 с кириллическими
+шрифтами и встроенной точкой доступа Wi-Fi. Телефон подключается к AP устройства —
+страница управления открывается автоматически (captive portal).
 
-```
-├── assets/
-│   ├── fonts/          ← сюда класть сгенерированные .c шрифты
-│   └── images/         ← сюда класть сгенерированные .c картинки
-├── scripts/
-│   ├── convert_font.sh ← помощник для lv_font_conv (кириллица)
-│   └── convert_image.sh
-├── main/
-│   ├── main.c
-│   ├── ui.c / ui.h
-│   └── CMakeLists.txt
-└── ...
-```
+## Возможности
+- 🖥 UI на LVGL 9: фото-фон, карточки, шрифты Inter/Roboto/Montserrat/NotoSans с кириллицей
+- 📶 Автоматический старт SoftAP (WPA2) при включении питания
+- 🌐 Веб-страница управления: цвет фона экрана, счётчик клиентов (HTTP, порт 80)
+- 🔗 Автооткрытие страницы: DNS-перехват (порт 53) + ответы на проверки порталов Android/iOS
+- 🏷 mDNS: интерфейс доступен по `http://dgw-sa1.local`
+- 🖼 Баннер «SOFTAP ONLINE» на экране при подключении первого клиента
 
-## Быстрый старт
+## Точка доступа
+| Параметр | Значение |
+|---|---|
+| SSID | `DGW-SA1-<XXXX>` (последние 2 байта MAC) |
+| Пароль | `displaygw` |
+| IP устройства | `192.168.4.1` |
+| Канал | 6 |
+| Макс. клиентов | 4 |
 
+## Сборка и прошивка
 ```bash
-git checkout lvgl9
 idf.py set-target esp32c3
 idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py -p COM<N> flash monitor
 ```
+Первая загрузка после смены sdkconfig.defaults: `del sdkconfig && idf.py fullclean`.
 
-## Как добавить красивый шрифт с кириллицей
-
-### Вариант 1 — скрипт (рекомендуется)
-
-```bash
-# Нужен Node.js + lv_font_conv
-npm install -g lv_font_conv
-
-# Конвертация
-./scripts/convert_font.sh /path/to/Inter-Regular.ttf 20 inter_20
-```
-
-Скрипт автоматически добавляет диапазоны:
-- `0x20-0x7F` (латиница)
-- `0x400-0x4FF` (кириллица)
-- bpp = 4 (красивое сглаживание)
-
-### Вариант 2 — онлайн
-
-https://lvgl.io/tools/fontconverter
-
-- Size: 20–24
-- Bpp: **4**
-- Range: `0x20-0x7F,0x400-0x4FF`
-
-### Использование
-
-```c
-LV_FONT_DECLARE(inter_20);
-lv_obj_set_style_text_font(label, &inter_20, 0);
-```
-
-Не забудь добавить `.c` файл в `main/CMakeLists.txt` → `SRCS`.
-
-## Как добавить картинку
-
-1. Конвертируй на https://lvgl.io/tools/imageconverter
-   - Color format: **RGB565**
-   - Output: C array
-2. Положи файл в `assets/images/`
-3. Добавь в `SRCS` CMakeLists.txt
-4. В коде:
-
-```c
-LV_IMAGE_DECLARE(my_bg);
-lv_obj_t * img = lv_image_create(parent);
-lv_image_set_src(img, &my_bg);
-```
-
-## Распиновка
-
-| Сигнал | GPIO |
-|--------|------|
-| SCK    | 2    |
-| MOSI   | 4    |
-| CS     | 5    |
-| DC     | 1    |
-| RST    | 0    |
-| BL     | 3.3V |
+## Структура
+- `main/main.c` — инициализация SPI/ILI9488/LVGL, запуск SoftAP
+- `main/ui.c/.h` — экраны LVGL, `ui_set_bg_color()`, `ui_show_ap_banner()`
+- `main/softap.c/.h` — Wi-Fi AP, DHCP, DNS-перехват, HTTP-сервер
+- `assets/fonts/` — сгенерированные lv_font_conv шрифты (кириллица)

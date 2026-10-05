@@ -18,6 +18,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "ui.h"
+#include "softap.h"
 
 static const char *TAG = "MAIN";
 
@@ -113,6 +114,15 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "UI готов. Наслаждайтесь плавной кириллицей!");
+
+    // ----- Точка доступа SoftAP + веб-интерфейс (ESP32C3-DGW-SA1) -----
+    if (softap_start() == ESP_OK) {
+        char ssid[40];
+        softap_get_ssid(ssid, sizeof(ssid));
+        ESP_LOGI(TAG, "SoftAP запущен: SSID='%s'", ssid);
+    } else {
+        ESP_LOGE(TAG, "Не удалось запустить точку доступа — продолжаем без неё");
+    }
 
     // Основной цикл ничего не делает — LVGL работает в собственной задаче
     while (1) {
