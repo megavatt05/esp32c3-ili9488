@@ -56,6 +56,25 @@ PRIV_REQUIRES esp_lcd esp_partition app_update esp_wifi esp_netif esp_event
 Правило: при переходе на IDF 6.x все зависимости вида `driver/xxx.h` заменять на
 соответствующий `esp_driver_xxx`.
 
+Дополнительно (уточнение по API v6): классический драйвер UART (`uart_driver_install`,
+`uart_config_t`, `uart_read_bytes`) в IDF 6.x перенесён в `driver/uart_v1.h` — старый
+`driver/uart.h` работает как совместимый алиас, но если компилятор его не находит,
+используйте guarded include:
+```c
+#if __has_include("driver/uart.h")
+#include "driver/uart.h"        // IDF 5.x / совместимый путь 6.x
+#else
+#include "driver/uart_v1.h"     // IDF 6.x: классический UART-драйвер
+#endif
+```
+Рекомендуемый паттерн CMakeLists (работает и на 5.x, и на 6.x без ручных правок):
+```cmake
+set(MAIN_REQUIRES esp_driver_uart esp_driver_gpio esp_driver_spi ...)
+if(NOT EXISTS "$ENV{IDF_PATH}/components/esp_driver_uart")
+    list(APPEND MAIN_REQUIRES driver)   # ESP-IDF <= 5.x: зонтичный компонент
+endif()
+```
+
 ## 9. CMake Error: Failed to resolve component 'mdns' ... unknown name (ветка softap-webui)
 Причина: mDNS удалён из дерева ESP-IDF 6.x и распространяется как managed-компонент.
 Решение:
