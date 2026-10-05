@@ -43,18 +43,36 @@
      espressif/mdns: "^1.2.0"
    ```
 2. `main/CMakeLists.txt` — разрешать имя динамически (проект может собираться
-   и под IDF 5.x, и под 6.x):
+   и под IDF 5.x, и под 6.x). ВАЖНО: managed-компоненты лежат в
+   `<корень проекта>/managed_components`, а НЕ рядом с `main/`; проверять нужно
+   оба расположения плюс дерево IDF, иначе EXISTS всегда false и в REQUIRES
+   попадает голое `mdns` → та же ошибка «unknown name»:
    ```cmake
-   foreach(_mdn mdns espressif__mdns)
-       if(EXISTS "${IDF_PATH}/components/${_mdn}" OR
-          EXISTS "${CMAKE_CURRENT_LIST_DIR}/../managed_components/${_mdn}")
-           list(APPEND MAIN_REQUIRES ${_mdn})
+   set(MDNS_RESOLVED FALSE)
+   foreach(_root "${PROJECT_DIR}/managed_components"
+                 "${CMAKE_CURRENT_LIST_DIR}/../managed_components"
+                 "$ENV{IDF_PATH}/components")
+       foreach(_mdn espressif__mdns mdns)
+           if(EXISTS "${_root}/${_mdn}/CMakeLists.txt")
+               list(APPEND MAIN_REQUIRES ${_mdn})
+               set(MDNS_RESOLVED TRUE)
+               break()
+           endif()
+       endforeach()
+       if(MDNS_RESOLVED)
            break()
        endif()
    endforeach()
+   if(NOT MDNS_RESOLVED)
+       # First configure: managed_components ещё не скачан — dependency manager
+       # зарегистрирует компонент сам, предполагаем имя IDF 6.x:
+       list(APPEND MAIN_REQUIRES espressif__mdns)
+   endif()
    ```
 **Проверка:** `ls managed_components | grep mdns` после первого configure;
 в коде include всегда `#include "mdns.h"` (префикс имени компонента в путь не входит).
+Если ошибка осталась — `idf.py fullclean && idf.py reconfigure` (stale build-дир
+кэширует старый список зависимостей).
 
 ## 6. Страница captive portal не открывается автоматически на телефоне
 **Симптомы:** Wi-Fi подключается, но браузер не всплывает / «Нет интернета» без редиректа.

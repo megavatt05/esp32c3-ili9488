@@ -20,13 +20,31 @@ set(MAIN_REQUIRES driver esp_lcd esp_partition esp_wifi esp_netif esp_event nvs_
 #   ESP-IDF >= 6.x : из IDF удалён; ставится managed-компонент "espressif__mdns"
 # (см. main/idf_component.yml). Без этого сборка падает:
 #   Failed to resolve component 'mdns' required by component 'main': unknown name.
-foreach(_mdn mdns espressif__mdns)
-    if(EXISTS "${IDF_PATH}/components/${_mdn}" OR
-       EXISTS "${CMAKE_CURRENT_LIST_DIR}/../managed_components/${_mdn}")
-        list(APPEND MAIN_REQUIRES ${_mdn})
+# ВАЖНО: managed-компоненты находятся в <корень проекта>/managed_components,
+# а не рядом с main/, поэтому проверяем оба расположения.
+set(MDNS_RESOLVED FALSE)
+foreach(_root "${PROJECT_DIR}/managed_components"
+              "${CMAKE_CURRENT_LIST_DIR}/../managed_components"
+              "$ENV{IDF_PATH}/components")
+    foreach(_mdn espressif__mdns mdns)
+        if(EXISTS "${_root}/${_mdn}/CMakeLists.txt")
+            list(APPEND MAIN_REQUIRES ${_mdn})
+            set(MDNS_RESOLVED TRUE)
+            message(STATUS "mDNS: использован компонент '${_mdn}' из ${_root}")
+            break()
+        endif()
+    endforeach()
+    if(MDNS_RESOLVED)
         break()
     endif()
 endforeach()
+if(NOT MDNS_RESOLVED)
+    # Fallback: на IDF 6.x managed-компонент всё равно регистрируется под именем
+    # espressif__mdns — добавляем его, чтобы idf_component_register не упал на
+    # «unknown name», а ошибка стала понятной на этапе сборки.
+    list(APPEND MAIN_REQUIRES espressif__mdns)
+    message(WARNING "mDNS: каталог managed_components ещё не создан — предполагаем espressif__mdns (будет скачан dependency-manager)")
+endif()
 
 idf_component_register(SRCS "main.c" "ui.c" "softap.c"
                     "../assets/fonts/font_inter_16.c"
