@@ -1,6 +1,6 @@
 /*
  * ESP32-C3 + ILI9488 + LVGL 9
- * Beautiful demo with rounded fonts and Cyrillic
+ * Красивое демо с круглыми шрифтами и кириллицей
  */
 
 #include <stdio.h>
@@ -21,7 +21,7 @@
 
 static const char *TAG = "MAIN";
 
-// Pinout
+// Распиновка
 #define LCD_HOST            SPI2_HOST
 #define PIN_NUM_SCLK        2
 #define PIN_NUM_MOSI        4
@@ -40,9 +40,9 @@ static esp_lcd_panel_io_handle_t io_handle = NULL;
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "ILI9488 + LVGL 9 demo starting...");
+    ESP_LOGI(TAG, "Запуск демо ILI9488 + LVGL 9...");
 
-    // ----- SPI bus -----
+    // ----- Шина SPI -----
     spi_bus_config_t buscfg = {
         .sclk_io_num = PIN_NUM_SCLK,
         .mosi_io_num = PIN_NUM_MOSI,
@@ -53,19 +53,19 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    // ----- Panel IO -----
+    // ----- Интерфейс панели (Panel IO) -----
     esp_lcd_panel_io_spi_config_t io_config = {
         .cs_gpio_num = PIN_NUM_LCD_CS,
         .dc_gpio_num = PIN_NUM_LCD_DC,
         .spi_mode = 0,
-        .pclk_hz = 40 * 1000 * 1000,     // 40 MHz - good balance
+        .pclk_hz = 40 * 1000 * 1000,     // 40 МГц — хороший баланс скорости и надёжности
         .trans_queue_depth = 10,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
 
-    // ----- ILI9488 panel -----
+    // ----- Панель ILI9488 -----
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_NUM_LCD_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
@@ -80,14 +80,14 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, false));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
-    // ----- LVGL port -----
+    // ----- Порт LVGL -----
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
 
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
-        .buffer_size = LCD_H_RES * 30,          // partial buffer
+        .buffer_size = LCD_H_RES * 30,          // частичный буфер
         .double_buffer = true,
         .hres = LCD_H_RES,
         .vres = LCD_V_RES,
@@ -99,22 +99,22 @@ void app_main(void)
         },
         .flags = {
             .buff_dma = true,
-            .buff_spiram = false,               // C3 usually has no PSRAM
+            .buff_spiram = false,               // у C3 обычно нет PSRAM
         }
     };
 
     lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
     assert(disp);
 
-    // Create UI under LVGL lock
+    // Создаём UI под блокировкой LVGL
     if (lvgl_port_lock(0)) {
         ui_init();
         lvgl_port_unlock();
     }
 
-    ESP_LOGI(TAG, "UI ready. Enjoy the smooth Cyrillic fonts!");
+    ESP_LOGI(TAG, "UI готов. Наслаждайтесь плавной кириллицей!");
 
-    // Main loop does nothing - LVGL runs in its own task
+    // Основной цикл ничего не делает — LVGL работает в собственной задаче
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
