@@ -26,6 +26,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_ili9488.h"
 #include "spi_freq_menu.h"
+#include "uart_input.h"
 
 static const char *TAG = "ILI9488";
 
@@ -294,6 +295,9 @@ static void spi_freq_test(void)
 
 void app_main(void)
 {
+    // Инициализация приёма из UART0 — ДО вывода меню, чтобы ввод работал
+    uart_input_init();
+
     // Проверка свободного места во flash перед инициализацией периферии
     check_flash_space();
 
