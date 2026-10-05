@@ -98,11 +98,21 @@
 
 **Решение:** в `main/CMakeLists.txt` перечислять конкретные драйвер-компоненты:
 ```cmake
-REQUIRES      esp_driver_gpio esp_driver_spi esp_driver_uart
-              esp_hw_support esp_timer vfs
-PRIV_REQUIRES esp_lcd esp_partition app_update esp_wifi esp_netif esp_event
+set(MAIN_REQUIRES esp_driver_uart esp_driver_gpio esp_driver_spi ...)
+if(NOT EXISTS "$ENV{IDF_PATH}/components/esp_driver_uart")
+    list(APPEND MAIN_REQUIRES driver)   # ESP-IDF <= 5.x: зонтичный компонент
+endif()
 ```
 Правило миграции на 6.x: `driver/xxx.h` → зависимость `esp_driver_xxx`.
+
+**Уточнение (официальная миграция 6.x):** классический UART-драйвер (`uart_driver_install`,
+`uart_config_t`) в IDF 6.x перенесён в `driver/uart_v1.h`; `driver/uart.h` остаётся
+совместимым алиасом при корректной зависимости от `esp_driver_uart`. Если алиас не
+найдётся — guarded include `#if __has_include("driver/uart.h") ... #else #include "driver/uart_v1.h"`.
+
+**Обновление:** исправление продублировано во ВСЕ ветки — `main` (`7d082c6`),
+`lvgl9` (`d71a7d0`), `softap-webui` (`2d9b166`). В lvgl9/softap-webui UART не
+используется, поэтому там достаточно `esp_driver_gpio` + `esp_driver_spi`.
 
 ---
 
