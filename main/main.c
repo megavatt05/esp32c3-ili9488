@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
+#include <stdarg.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,7 +23,6 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "driver/uart.h"
-#include "driver/gpio.h"
 
 #if __has_include("driver/uart_vfs.h")
 #include "driver/uart_vfs.h"
@@ -109,7 +108,6 @@ static void cmd_hex(const char *s)
 
 static void handle_line(char *line)
 {
-    /* срезать края */
     while (*line == ' ' || *line == '\t') {
         line++;
     }
@@ -150,7 +148,7 @@ static void handle_line(char *line)
     }
     if (strcmp(line, "tick on") == 0) {
         s_tick_on = true;
-        uart_send("tick ON (каждые 5 с)\r\n> ");
+        uart_send("tick ON (5s)\r\n> ");
         return;
     }
     if (strcmp(line, "tick off") == 0) {
@@ -169,7 +167,6 @@ static void handle_line(char *line)
         return;
     }
 
-    /* По умолчанию: показать приём и эхо */
     uart_send("RX: ");
     uart_send(line);
     uart_send("\r\nTX: ");
@@ -270,8 +267,8 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(200));
     uart_send("\r\n\r\n**** ESP32-C3 UART-only ****\r\n");
     uart_printf_line("UART%d %d 8N1  RX=GPIO20 TX=GPIO21", (int)UART_NUM, UART_BAUD);
-    uart_send("Печатайте на клавиатуре, Enter отправляет строку.\r\n");
-    uart_send("Команда help — список команд.\r\n> ");
+    uart_send("Type on the keyboard, Enter sends the line.\r\n");
+    uart_send("Command help — list of commands.\r\n> ");
 
     xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 5, NULL);
     xTaskCreate(tick_task, "uart_tick", 2048, NULL, 3, NULL);
