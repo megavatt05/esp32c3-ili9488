@@ -1,67 +1,41 @@
-# ESP32-C3 + ILI9488 (SPI) — ESP-IDF 6.0.3
+# uart-only — ESP32-C3 UART TX/RX
 
-Полный рабочий пример подключения дисплея **ILI9488** к **ESP32-C3 Super Mini** по SPI.
+Ветка **без дисплея и без Wi-Fi**. Только полный UART: приём, отправка, ввод с клавиатуры в `idf.py monitor`.
 
-## Распиновка (проверенная)
+## Железо
 
-| Дисплей ILI9488     | ESP32-C3 (Super Mini) | Примечание                                      |
-|---------------------|-----------------------|-------------------------------------------------|
-| VCC / VDD           | 3.3V или 5V           | Смотри модуль (многие хотят 5V)                 |
-| GND                 | GND                   | Обязательно                                     |
-| CS                  | **GPIO5**             | Chip Select                                     |
-| RST / RESET         | **GPIO0**             | Можно соединить с EN/RESET платы                |
-| DC / RS             | **GPIO1**             | Data/Command                                    |
-| SDI / MOSI / SDA    | **GPIO4**             | Данные                                          |
-| SCK / CLK           | **GPIO2**             | Clock                                           |
-| LED / BL / BLK      | 3.3V                  | Подсветка (постоянно включена)                  |
-| SDO / MISO          | не подключать         | У ILI9488 часто проблема с Hi-Z                 |
+ESP32-C3 Super Mini, USB-UART:
 
-## Требования
+| Сигнал | GPIO |
+|--------|------|
+| UART0 RX | 20 |
+| UART0 TX | 21 |
+| GND | GND |
 
-- ESP-IDF **6.0.3** (или совместимая 6.x)
-- Компонент `atanisoft/esp_lcd_ili9488` ≥ 1.1.1
+Скорость: **115200 8N1**.
 
-## Быстрый старт
+## Сборка
 
-```bash
-# Клонировать
-git clone https://github.com/megavatt05/esp32c3-ili9488.git
-cd esp32c3-ili9488
-
-# Установить цель
+```powershell
+git fetch origin
+git checkout uart-only
+idf.py fullclean
 idf.py set-target esp32c3
-
-# Собрать
 idf.py build
-
-# Прошить и смотреть лог
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py -p COMx flash monitor
 ```
 
-## Что делает пример
+В мониторе печатай текст и нажимай **Enter** (Windows CR поддерживается).
 
-1. Инициализирует SPI2
-2. Создаёт panel IO + ILI9488 панель (18-bit color)
-3. Заливает экран разными цветами в цикле
+## Команды
 
-## Структура проекта
-
-```
-├── CMakeLists.txt
-├── idf_component.yml
-├── main/
-│   ├── CMakeLists.txt
-│   └── main.c
-├── .github/
-│   └── workflows/
-│       └── build.yml          # CI: проверка компиляции для ESP32-C3
-└── README.md
-```
-
-## CI
-
-GitHub Actions автоматически проверяет, что проект успешно компилируется под `esp32c3` на каждом push/PR.
-
-## Лицензия
-
-MIT
+| Ввод | Что делает |
+|------|-----------|
+| любой текст | эхо обратно в терминал |
+| `help` | список команд |
+| `ping` | ответ `pong` |
+| `echo привет` | отправить строку |
+| `hex привет` | то же в hex |
+| `stats` | счётчики RX/TX |
+| `tick on` / `tick off` | периодическая отправка статуса |
+| `info` | UART, baud, пины |

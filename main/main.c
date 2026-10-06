@@ -1,361 +1,278 @@
 /*
- * ESP-IDF 6.0.3: ILI9488 SPI на ESP32-C3 Super Mini
+ * ESP32-C3 — только UART0.
+ * Без дисплея, без Wi-Fi, без BT.
  *
- * Частота SPI задаётся из терминала:
- *   при старте — меню 45 с;
- *   во время демо — в любой момент: 1..8 или 40M + Enter.
+ * Приём с клавиатуры терминала (idf.py monitor):
+ *   ввод эхируется, Enter завершает строку (CR или LF).
+ * Отправка: эхо, ответы на команды, опциональный tick.
  *
- * Pinout: CS=GPIO5 RST=GPIO0 DC=GPIO1 MOSI=GPIO4 SCK=GPIO2
+ * ESP-IDF 6.x:
+ *   #include "driver/uart_vfs.h"
+ *   uart_vfs_dev_use_driver() → void
+ *   uart_write_bytes(), не uart_write_byte()
  */
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "esp_err.h"
-#include "esp_heap_caps.h"
-#include "esp_partition.h"
-#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "driver/uart.h"
 #include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_vendor.h"
-#include "esp_lcd_ili9488.h"
-#include "spi_freq_menu.h"
-#include "uart_input.h"
 
-static const char *TAG = "ILI9488";
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"
+#define UART_VFS_HAS_NEW_API 1
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"
+#define UART_VFS_HAS_NEW_API 0
+#else
+#define UART_VFS_HAS_NEW_API -1
+#endif
 
-#define LCD_HOST            SPI2_HOST
-#define PIN_NUM_SCLK        2
-#define PIN_NUM_MOSI        4
-#define PIN_NUM_MISO        -1
-#define PIN_NUM_LCD_CS      5
-#define PIN_NUM_LCD_DC      1
-#define PIN_NUM_LCD_RST     0
+#ifndef CONFIG_ESP_CONSOLE_UART_NUM
+#define CONFIG_ESP_CONSOLE_UART_NUM 0
+#endif
 
-#define LCD_H_RES           320
-#define LCD_V_RES           480
-#define LCD_BUFFER_LINES    40
-#define LCD_BUFFER_SIZE     (LCD_H_RES * LCD_BUFFER_LINES)
+#define UART_NUM   ((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM)
+#define UART_BAUD  115200
+#define UART_RX_BUF 2048
+#define UART_TX_BUF 1024
+#define LINE_MAX    128
 
-static esp_lcd_panel_handle_t panel_handle = NULL;
-static esp_lcd_panel_io_handle_t io_handle = NULL;
-static int s_freq_mhz = 40;
-static bool s_spi_bus_ready = false;
+static const char *TAG = "UART";
 
-static esp_err_t check_flash_space(void)
+static volatile uint32_t s_rx_bytes;
+static volatile uint32_t s_tx_bytes;
+static volatile uint32_t s_rx_lines;
+static volatile bool s_tick_on;
+
+static void uart_send(const char *s)
 {
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    if (!running) {
-        ESP_LOGE(TAG, "Не удалось получить информацию о разделе приложения");
-        return ESP_FAIL;
+    if (!s) {
+        return;
     }
-
-    size_t part_size = running->size;
-    uint8_t buf[256];
-    size_t used = part_size;
-    for (ssize_t off = (ssize_t)part_size - (ssize_t)sizeof(buf); off >= 0; off -= sizeof(buf)) {
-        if (esp_partition_read(running, off, buf, sizeof(buf)) != ESP_OK) {
-            break;
-        }
-        bool all_ff = true;
-        for (size_t i = 0; i < sizeof(buf); i++) {
-            if (buf[i] != 0xFF) {
-                all_ff = false;
-                break;
-            }
-        }
-        if (!all_ff) {
-            used = off + sizeof(buf);
-            break;
-        }
-        used = off;
+    size_t n = strlen(s);
+    int w = uart_write_bytes(UART_NUM, s, n);
+    if (w > 0) {
+        s_tx_bytes += (uint32_t)w;
     }
-
-    size_t free_bytes = part_size - used;
-    int percent_used = (int)((used * 100) / part_size);
-    ESP_LOGI(TAG, "Flash-раздел '%s': размер %u КБ, занято ~%u КБ (%d%%), свободно ~%u КБ",
-             running->label, (unsigned)(part_size / 1024),
-             (unsigned)(used / 1024), percent_used,
-             (unsigned)(free_bytes / 1024));
-
-    if (free_bytes < part_size / 20) {
-        ESP_LOGW(TAG, "ВНИМАНИЕ: в flash-разделе осталось менее 5%% места!");
-        return ESP_ERR_INVALID_SIZE;
-    }
-    return ESP_OK;
 }
 
-static void fill_color(uint16_t color)
+static void uart_send_crlf(void)
 {
-    if (!panel_handle) {
-        return;
-    }
-    uint16_t *buf = heap_caps_malloc(LCD_H_RES * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!buf) {
-        return;
-    }
-    for (int i = 0; i < LCD_H_RES; i++) {
-        buf[i] = color;
-    }
-    for (int y = 0; y < LCD_V_RES; y++) {
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, y, LCD_H_RES, y + 1, buf);
-    }
-    free(buf);
+    uart_send("\r\n");
 }
 
-typedef struct {
-    uint16_t color;
-    const char *name;
-} color_item_t;
-
-static const color_item_t COLORS[] = {
-    { 0xF800, "RED" },
-    { 0x07E0, "GREEN" },
-    { 0x001F, "BLUE" },
-    { 0xFFFF, "WHITE" },
-    { 0x0000, "BLACK" },
-    { 0xFFE0, "YELLOW" },
-    { 0xF81F, "MAGENTA" },
-    { 0x07FF, "CYAN" },
-};
-#define NUM_COLORS (sizeof(COLORS) / sizeof(COLORS[0]))
-
-static void draw_text(const char *text, uint16_t fg, uint16_t bg)
+static void uart_printf_line(const char *fmt, ...)
 {
-    if (!panel_handle) {
-        return;
+    char buf[192];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        uart_send(buf);
+        uart_send_crlf();
     }
-    static const char *GLYPHS[36][7] = {
-        {"01110","10001","10001","11111","10001","10001","10001"},
-        {"11110","10001","10001","11110","10001","10001","11110"},
-        {"01111","10000","10000","10000","10000","10000","01111"},
-        {"11110","10001","10001","10001","10001","10001","11110"},
-        {"11111","10000","10000","11110","10000","10000","11111"},
-        {"11111","10000","10000","11110","10000","10000","10000"},
-        {"01111","10000","10000","10111","10001","10001","01111"},
-        {"10001","10001","10001","11111","10001","10001","10001"},
-        {"11111","00100","00100","00100","00100","00100","11111"},
-        {"11111","01000","01000","01000","01001","01001","11110"},
-        {"10001","10010","10100","11000","10100","10010","10001"},
-        {"10000","10000","10000","10000","10000","10000","11111"},
-        {"10001","11011","10101","10101","10001","10001","10001"},
-        {"10001","11001","10101","10011","10001","10001","10001"},
-        {"01110","10001","10001","10001","10001","10001","01110"},
-        {"11110","10001","10001","11110","10000","10000","10000"},
-        {"01110","10001","10001","10001","10101","10010","01101"},
-        {"11110","10001","10001","11110","10100","10010","10001"},
-        {"01111","10000","10000","01110","00001","00001","11110"},
-        {"11111","00100","00100","00100","00100","00100","00100"},
-        {"10001","10001","10001","10001","10001","10001","01110"},
-        {"10001","10001","10001","10001","10001","01010","00100"},
-        {"10001","10001","10001","10101","10101","11011","10001"},
-        {"10001","10001","01010","00100","01010","10001","10001"},
-        {"10001","10001","01010","00100","00100","00100","00100"},
-        {"11111","00001","00010","00100","01000","10000","11111"},
-        {"01110","10001","10011","10101","11001","10001","01110"},
-        {"00100","01100","00100","00100","00100","00100","01110"},
-        {"01110","10001","00001","00010","00100","01000","11111"},
-        {"11111","00010","00100","00010","00001","10001","01110"},
-        {"00010","00110","01010","10010","11111","00010","00010"},
-        {"11111","10000","11110","00001","00001","10001","01110"},
-        {"01110","10000","10000","11110","10001","10001","01110"},
-        {"11111","00001","00010","00100","01000","01000","01000"},
-        {"01110","10001","10001","01110","10001","10001","01110"},
-        {"01110","10001","10001","01111","00001","00001","01110"},
-    };
-    const int SCALE = 6;
-    const int CHAR_W = 5 * SCALE;
-    const int CHAR_H = 7 * SCALE;
-    const int GAP = SCALE;
+}
 
-    int len = (int)strlen(text);
-    int total_w = len * CHAR_W + (len > 0 ? (len - 1) : 0) * GAP;
-    if (total_w > LCD_H_RES) {
-        return;
+static void print_help(void)
+{
+    uart_send("\r\n=== UART console ESP32-C3 ===\r\n");
+    uart_send("  любой текст     эхо строки обратно\r\n");
+    uart_send("  help              эта справка\r\n");
+    uart_send("  ping              ответ pong\r\n");
+    uart_send("  echo <text>       отправить text\r\n");
+    uart_send("  hex <text>        показать text в hex\r\n");
+    uart_send("  stats             счётчики RX/TX\r\n");
+    uart_send("  tick on|off       периодическая отправка\r\n");
+    uart_send("  info              параметры UART\r\n");
+    uart_send("> ");
+}
+
+static void cmd_hex(const char *s)
+{
+    uart_send("HEX:");
+    for (; *s; s++) {
+        char tmp[8];
+        snprintf(tmp, sizeof(tmp), " %02X", (unsigned char)*s);
+        uart_send(tmp);
     }
-    int x0 = (LCD_H_RES - total_w) / 2;
-    int y0 = (LCD_V_RES - CHAR_H) / 2;
+    uart_send_crlf();
+}
 
-    uint16_t *rowbuf = heap_caps_malloc(LCD_H_RES * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!rowbuf) {
+static void handle_line(char *line)
+{
+    /* срезать края */
+    while (*line == ' ' || *line == '\t') {
+        line++;
+    }
+    size_t n = strlen(line);
+    while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t')) {
+        line[--n] = 0;
+    }
+    if (n == 0) {
+        uart_send("> ");
         return;
     }
 
-    for (int ry = 0; ry < CHAR_H; ry++) {
-        for (int x = 0; x < LCD_H_RES; x++) {
-            rowbuf[x] = bg;
+    s_rx_lines++;
+
+    if (strcmp(line, "help") == 0 || strcmp(line, "?") == 0) {
+        print_help();
+        return;
+    }
+    if (strcmp(line, "ping") == 0) {
+        uart_send("pong\r\n> ");
+        return;
+    }
+    if (strcmp(line, "stats") == 0) {
+        uart_printf_line("stats: rx_bytes=%u tx_bytes=%u lines=%u tick=%s",
+                         (unsigned)s_rx_bytes, (unsigned)s_tx_bytes,
+                         (unsigned)s_rx_lines, s_tick_on ? "on" : "off");
+        uart_send("> ");
+        return;
+    }
+    if (strcmp(line, "info") == 0) {
+        uart_printf_line("UART%d %d 8N1  console RX=GPIO20 TX=GPIO21 (C3 Super Mini)",
+                         (int)UART_NUM, UART_BAUD);
+        uart_printf_line("free_heap=%u uptime_ms=%lld",
+                         (unsigned)esp_get_free_heap_size(),
+                         (long long)(esp_timer_get_time() / 1000));
+        uart_send("> ");
+        return;
+    }
+    if (strcmp(line, "tick on") == 0) {
+        s_tick_on = true;
+        uart_send("tick ON (каждые 5 с)\r\n> ");
+        return;
+    }
+    if (strcmp(line, "tick off") == 0) {
+        s_tick_on = false;
+        uart_send("tick OFF\r\n> ");
+        return;
+    }
+    if (strncmp(line, "echo ", 5) == 0) {
+        uart_send(line + 5);
+        uart_send("\r\n> ");
+        return;
+    }
+    if (strncmp(line, "hex ", 4) == 0) {
+        cmd_hex(line + 4);
+        uart_send("> ");
+        return;
+    }
+
+    /* По умолчанию: показать приём и эхо */
+    uart_send("RX: ");
+    uart_send(line);
+    uart_send("\r\nTX: ");
+    uart_send(line);
+    uart_send("\r\n> ");
+}
+
+static void tick_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (!s_tick_on) {
+            continue;
         }
-        for (int ci = 0; ci < len; ci++) {
-            char ch = text[ci];
-            if (ch == ' ') {
-                continue;
-            }
-            int gi = -1;
-            if (ch >= 'A' && ch <= 'Z') {
-                gi = ch - 'A';
-            } else if (ch >= 'a' && ch <= 'z') {
-                gi = ch - 'a';
-            } else if (ch >= '0' && ch <= '9') {
-                gi = 26 + (ch - '0');
-            }
-            if (gi < 0) {
-                continue;
-            }
-            int glyph_row = ry / SCALE;
-            if (glyph_row > 6) {
-                continue;
-            }
-            const char *bits = GLYPHS[gi][glyph_row];
-            int cx = x0 + ci * (CHAR_W + GAP);
-            for (int b = 0; b < 5; b++) {
-                if (bits[b] == '1') {
-                    int px = cx + b * SCALE;
-                    for (int s = 0; s < SCALE; s++) {
-                        if (px + s >= 0 && px + s < LCD_H_RES) {
-                            rowbuf[px + s] = fg;
-                        }
-                    }
-                }
-            }
-        }
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, y0 + ry, LCD_H_RES, y0 + ry + 1, rowbuf);
+        uart_printf_line("[tick] uptime=%lld ms rx=%u tx=%u",
+                         (long long)(esp_timer_get_time() / 1000),
+                         (unsigned)s_rx_bytes, (unsigned)s_tx_bytes);
     }
-    free(rowbuf);
 }
 
-static esp_err_t lcd_start(int freq_mhz)
+static void uart_rx_task(void *arg)
 {
-    if (panel_handle) {
-        esp_lcd_panel_del(panel_handle);
-        panel_handle = NULL;
-    }
-    if (io_handle) {
-        esp_lcd_panel_io_del(io_handle);
-        io_handle = NULL;
-    }
-
-    if (!s_spi_bus_ready) {
-        spi_bus_config_t buscfg = {
-            .sclk_io_num = PIN_NUM_SCLK,
-            .mosi_io_num = PIN_NUM_MOSI,
-            .miso_io_num = PIN_NUM_MISO,
-            .quadwp_io_num = -1,
-            .quadhd_io_num = -1,
-            .max_transfer_sz = LCD_H_RES * LCD_BUFFER_LINES * sizeof(uint16_t) + 8,
-        };
-        ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
-        s_spi_bus_ready = true;
-    }
-
-    esp_lcd_panel_io_spi_config_t io_config = {
-        .cs_gpio_num = PIN_NUM_LCD_CS,
-        .dc_gpio_num = PIN_NUM_LCD_DC,
-        .spi_mode = 0,
-        .pclk_hz = freq_mhz * 1000 * 1000,
-        .trans_queue_depth = 10,
-        .lcd_cmd_bits = 8,
-        .lcd_param_bits = 8,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
-
-    esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = PIN_NUM_LCD_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
-        .bits_per_pixel = 18,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9488(io_handle, &panel_config, LCD_BUFFER_SIZE, &panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, false, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
-
-    s_freq_mhz = freq_mhz;
-    ESP_LOGI(TAG, "SPI частота установлена: %d МГц", freq_mhz);
-    return ESP_OK;
-}
-
-static void show_freq_on_lcd(int mhz)
-{
-    char freq_str[24];
-    snprintf(freq_str, sizeof(freq_str), "%dMHZ", mhz);
-    fill_color(0x0000);
-    draw_text(freq_str, 0xFFFF, 0x0000);
-}
-
-static bool poll_freq_change(int wait_ms)
-{
-    char line[32];
-    int n = uart_input_line(line, sizeof(line), wait_ms);
-    if (n <= 0) {
-        return false;
-    }
-    int mhz = spi_freq_parse_mhz(line);
-    if (mhz <= 0) {
-        printf("Некорректно '%s'. Пример: 2  или  40M\n> ", line);
-        fflush(stdout);
-        return false;
-    }
-    if (mhz == s_freq_mhz) {
-        printf("Уже %d МГц\n> ", mhz);
-        fflush(stdout);
-        return false;
-    }
-    printf("Меняю SPI на %d МГц...\n", mhz);
-    fflush(stdout);
-    if (lcd_start(mhz) != ESP_OK) {
-        ESP_LOGE(TAG, "Не удалось сменить частоту");
-        return false;
-    }
-    show_freq_on_lcd(mhz);
-    printf("SPI шина работает на частоте %d МГц\n> ", mhz);
-    fflush(stdout);
-    vTaskDelay(pdMS_TO_TICKS(800));
-    return true;
-}
-
-static void color_cycle_demo(void)
-{
-    printf("Демо цветов. Частоту можно сменить в любой момент:\n");
-    printf("  1=10МГц  2=20  3=30  4=40  5=50  6=60  7=70  8=80\n");
-    printf("  или 45M + Enter\n> ");
-    fflush(stdout);
+    (void)arg;
+    char line[LINE_MAX];
+    size_t len = 0;
 
     while (1) {
-        for (size_t c = 0; c < NUM_COLORS; c++) {
-            uint16_t bg = COLORS[c].color;
-            uint16_t fg = (bg == 0x0000 || bg == 0x001F || bg == 0xF81F || bg == 0x07E0)
-                          ? 0xFFFF : 0x0000;
-            fill_color(bg);
-            draw_text(COLORS[c].name, fg, bg);
-            ESP_LOGI(TAG, "Цвет %d/%u: %s @ %d МГц",
-                     (int)c + 1, (unsigned)NUM_COLORS, COLORS[c].name, s_freq_mhz);
-            (void)poll_freq_change(1500);
+        uint8_t ch;
+        int n = uart_read_bytes(UART_NUM, &ch, 1, pdMS_TO_TICKS(50));
+        if (n <= 0) {
+            continue;
+        }
+        s_rx_bytes += (uint32_t)n;
+
+        if (ch == '\r' || ch == '\n') {
+            if (len == 0) {
+                continue;
+            }
+            line[len] = 0;
+            uart_send("\r\n");
+            handle_line(line);
+            len = 0;
+            continue;
+        }
+        if (ch == 0x08 || ch == 0x7F) {
+            if (len > 0) {
+                len--;
+                uart_send("\b \b");
+            }
+            continue;
+        }
+        if (ch >= 32 && ch < 127) {
+            if (len + 1 < sizeof(line)) {
+                line[len++] = (char)ch;
+                uart_write_bytes(UART_NUM, (const char *)&ch, 1);
+                s_tx_bytes++;
+            }
         }
     }
+}
+
+static void uart_console_init(void)
+{
+    uart_config_t cfg = {
+        .baud_rate = UART_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    ESP_ERROR_CHECK(uart_param_config(UART_NUM, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(UART_NUM,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+    esp_err_t err = uart_driver_install(UART_NUM, UART_RX_BUF, UART_TX_BUF, 0, NULL, 0);
+    if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(TAG, "UART%d driver already installed", (int)UART_NUM);
+    } else {
+        ESP_ERROR_CHECK(err);
+    }
+
+#if UART_VFS_HAS_NEW_API == 1
+    uart_vfs_dev_use_driver(UART_NUM);
+    uart_vfs_dev_port_set_rx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_tx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CRLF);
+#elif UART_VFS_HAS_NEW_API == 0
+    (void)esp_vfs_dev_uart_use_driver(UART_NUM);
+#endif
 }
 
 void app_main(void)
 {
-    uart_input_init();
-    check_flash_space();
+    uart_console_init();
 
-    int freq_mhz = spi_freq_select_mhz();
-    printf("Итоговая частота шины SPI: %d МГц (%d Гц)\n", freq_mhz, freq_mhz * 1000000);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    uart_send("\r\n\r\n**** ESP32-C3 UART-only ****\r\n");
+    uart_printf_line("UART%d %d 8N1  RX=GPIO20 TX=GPIO21", (int)UART_NUM, UART_BAUD);
+    uart_send("Печатайте на клавиатуре, Enter отправляет строку.\r\n");
+    uart_send("Команда help — список команд.\r\n> ");
 
-    ESP_LOGI(TAG, "Инициализация дисплея...");
-    ESP_ERROR_CHECK(lcd_start(freq_mhz));
-
-    printf("SPI шина работает на частоте %d МГц\n", freq_mhz);
-    show_freq_on_lcd(freq_mhz);
-    vTaskDelay(pdMS_TO_TICKS(1200));
-
-    ESP_LOGI(TAG, "Дисплей готов");
-    color_cycle_demo();
+    xTaskCreate(uart_rx_task, "uart_rx", 4096, NULL, 5, NULL);
+    xTaskCreate(tick_task, "uart_tick", 2048, NULL, 3, NULL);
 }

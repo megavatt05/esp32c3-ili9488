@@ -1,22 +1,18 @@
-name: Build ESP32-C3
+name: Build ESP32-C3 UART-only
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ uart-only ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ uart-only ]
 
 jobs:
   build:
-    name: Build for esp32c3 (IDF 6.0.3)
+    name: Build uart-only (IDF 6.0.3, esp32c3)
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build with ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
+      - uses: actions/checkout@v4
+      - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.3
           target: esp32c3
