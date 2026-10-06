@@ -4,7 +4,7 @@
  * ESP-IDF 5.3+ / 6.x:
  *  - UART VFS перенесён в esp_driver_uart
  *  - esp_vfs_dev_uart_*  →  uart_vfs_dev_*
- *  - заголовок: driver/uart_vfs.h
+ *  - uart_vfs_dev_use_driver() возвращает void (не esp_err_t!)
  *
  * Документация:
  *  https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/migration-guides/release-5.x/5.3/storage.html
@@ -17,16 +17,16 @@
 #include "driver/uart.h"
 
 // Совместимость версий ESP-IDF:
-//  - IDF >= 5.3 / 6.x : driver/uart_vfs.h + uart_vfs_dev_use_driver()
-//  - IDF <= 5.2       : esp_vfs_dev.h     + esp_vfs_dev_uart_use_driver()
+//  - IDF >= 5.3 / 6.x : driver/uart_vfs.h + uart_vfs_dev_use_driver() → void
+//  - IDF <= 5.2       : esp_vfs_dev.h     + esp_vfs_dev_uart_use_driver() → esp_err_t
 #if __has_include("driver/uart_vfs.h")
 #include "driver/uart_vfs.h"          // ESP-IDF 5.3+ / 6.x
-#define UART_VFS_USE_DRIVER(n)  uart_vfs_dev_use_driver(n)
+#define UART_VFS_HAS_NEW_API 1
 #elif __has_include("esp_vfs_dev.h")
 #include "esp_vfs_dev.h"              // ESP-IDF 5.0 – 5.2
-#define UART_VFS_USE_DRIVER(n)  esp_vfs_dev_uart_use_driver(n)
+#define UART_VFS_HAS_NEW_API 0
 #else
-#define UART_VFS_USE_DRIVER(n)  ESP_ERR_NOT_SUPPORTED
+#define UART_VFS_HAS_NEW_API -1
 #endif
 
 #include "esp_log.h"
@@ -50,11 +50,19 @@ void uart_input_init(void)
     }
 
     // Привязать stdin к драйверу UART0
-    esp_err_t verr = UART_VFS_USE_DRIVER(0);
+#if UART_VFS_HAS_NEW_API == 1
+    // ESP-IDF 5.3+ / 6.x — функция возвращает void
+    uart_vfs_dev_use_driver(0);
+    ESP_LOGI(TAG_UART_IN, "uart_vfs_dev_use_driver(0) called");
+#elif UART_VFS_HAS_NEW_API == 0
+    // Старый API — возвращает esp_err_t
+    esp_err_t verr = esp_vfs_dev_uart_use_driver(0);
     if (verr != ESP_OK) {
-        ESP_LOGW(TAG_UART_IN, "uart_vfs_dev_use_driver: %s (используем прямой опрос UART)",
-                 esp_err_to_name(verr));
+        ESP_LOGW(TAG_UART_IN, "esp_vfs_dev_uart_use_driver: %s", esp_err_to_name(verr));
     }
+#else
+    ESP_LOGW(TAG_UART_IN, "No UART VFS header found — using direct uart_read_bytes only");
+#endif
 
     s_ready = true;
     ESP_LOGI(TAG_UART_IN, "Ввод через UART0 готов");
@@ -81,7 +89,7 @@ int uart_input_line(char *buf, size_t buf_size, int timeout_ms)
         if (ch >= ' ' && ch <= '~') {
             if (len + 1 < buf_size) {
                 buf[len++] = (char)ch;
-                // Эхо в терминал (правильная функция — uart_write_bytes)
+                // Эхо в терминал
                 uart_write_bytes(UART_NUM_0, (const char *)&ch, 1);
             }
         }
