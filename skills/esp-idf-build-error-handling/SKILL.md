@@ -23,6 +23,20 @@
 
 Только после изучения примера писать код, повторяя его структуру инклюдов, имён констант и зависимостей CMakeLists.
 
+### 0.1. Проверка НАПИСАННОГО кода по документации (обязательный второй проход)
+После правки — сверить каждое использованное поле/опцию с официальной документацией Espressif
+(docs.espressif.com, актуальная версия IDF). Практика проверки softap.c выявила реальные расхождения:
+
+| Что проверять | Документ | Правильно | Типичная ошибка «по памяти» |
+|---|---|---|---|
+| Ширина канала SoftAP | esp_wifi.h → `wifi_config_t::ap.ht_channel_width` | явно `WIFI_HT_SECONDARY_NONE` (HT20) | оставить default → драйвер сам скачет 20/40 МГц, дребезг `wifi:new:<6,0>/<6,1>`, клиенты отваливаются reason=15 |
+| Слоты HTTP-сервера | esp_http_server → `httpd_config_t::max_open_sockets` | строго `< CONFIG_LWIP_MAX_SOCKETS` (часть сокетов занимают DNS/mDNS/стек) | `HTTPD_DEFAULT_CONFIG()` = 7 при LWIP_MAX_SOCKETS=24 — неочевидно, лимит сервера молча режет всплеск captive portal |
+| Управляющий сокет | `httpd_config_t::ctrl_port` | `-1` экономит 1 дескриптор, если сервер не перезапускается извне | дефолтный 80+1 занимает лишний сокет |
+| SO_REUSEADDR поверх bind() на 53/80 | lwip → опции сокетов | нужен `CONFIG_LWIP_SO_REUSE=y` в sdkconfig.defaults | без Kconfig-опции setsockopt(SO_REUSEADDR) частично игнорируется |
+| Имена событий Wi-Fi | esp_wifi_types_generic.h → `wifi_event_t` | `WIFI_EVENT_AP_START` | `WIFI_AP_STARTUP` / `WIFI_EVENT_AP_STARTUP` (не существует ни в 5.x, ни в 6.x) |
+
+Приём: после коммита пройтись по списку идентификаторов (`grep -o "wc\.ap\.[a-z_]*\|cfg\.[a-z_]*" main/*.c`) и для каждого найти строку в заголовке `$IDF_PATH/components/.../include/` или на docs.espressif.com. Если символа нет в заголовке вашей версии IDF — он выдуман.
+
 ## 1. fatal error: lvgl/lvgl.h: No such file or directory
 Причина: сгенерированные lv_font_conv шрифты делают `#include "lvgl/lvgl.h"`, а в сборке ESP-IDF заголовок лежит как `lvgl.h` (компонент добавляет свой include-путь).
 Решение (в трёх слоях):
