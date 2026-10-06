@@ -1,38 +1,18 @@
-# ================== Сборка ESP-IDF ==================
+# Артефакты сборки ESP-IDF
 build/
-build*/
 managed_components/
-dependencies_lock.yml
-components/
+dependencies.lock
 
-# sdkconfig генерируется из sdkconfig.defaults — не коммитим
+# Конфигурация (генерируется из sdkconfig.defaults)
 sdkconfig
 sdkconfig.old
-sdkconfig.ci
 
-# ================== Python ==================
+# Python
 __pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
+*.pyc
 
-# ================== Временные файлы ==================
-*.bak
-*.tmp
-*.swp
+# Временные файлы
 *.log
-*.orig
+*.tmp
 .DS_Store
 Thumbs.db
-
-# ================== IDE ==================
-.idea/
-.vscode/
-*.user
-CMakeLists.txt.user
-
-# ================== Артефакты прошивки ==================
-*.bin
-!assets/**/*.bin
