@@ -1,7 +1,5 @@
 /*
- * Меню выбора частоты SPI-шины через терминал (UART0).
- * Реализация: печать списка + uart_input_line() с таймаутом
- * (надёжный приём напрямую из UART, без зависимости от fgets/stdin).
+ * Меню частоты SPI. Ввод: номер пункта 1..8, либо 45 / 45M.
  */
 
 #include <stdio.h>
@@ -13,66 +11,87 @@
 
 static const char *TAG_FREQ = "SPI_MENU";
 
-#define FREQ_INPUT_TIMEOUT_MS 30000   // ждём выбор пользователя 30 секунд
+#define FREQ_INPUT_TIMEOUT_MS 45000
+#define MIN_MHZ 1
+#define MAX_MHZ 80
+#define DEFAULT_MHZ 40
+
+int spi_freq_parse_mhz(const char *line)
+{
+    if (!line || line[0] == 0) {
+        return 0;
+    }
+
+    const int freqs[] = SPI_FREQ_LIST;
+    const int n = (int)(sizeof(freqs) / sizeof(freqs[0]));
+
+    char *endp = NULL;
+    long val = strtol(line, &endp, 10);
+    if (endp == line) {
+        return 0;
+    }
+    while (*endp == ' ' || *endp == '\t') {
+        endp++;
+    }
+
+    if (*endp == 'M' || *endp == 'm') {
+        endp++;
+        if (*endp == 'H' || *endp == 'h') {
+            endp++;
+            if (*endp == 'Z' || *endp == 'z') {
+                endp++;
+            }
+        }
+        if (*endp == 0 && val >= MIN_MHZ && val <= MAX_MHZ) {
+            return (int)val;
+        }
+        return 0;
+    }
+
+    if (*endp != 0) {
+        return 0;
+    }
+
+    /* Число 1..N — пункт меню. Число > N — частота в МГц. */
+    if (val >= 1 && val <= n) {
+        return freqs[val - 1];
+    }
+    if (val >= MIN_MHZ && val <= MAX_MHZ) {
+        return (int)val;
+    }
+    return 0;
+}
 
 int spi_freq_select_mhz(void)
 {
-    /* Стандартные частоты по порядку: 1 => 10 МГц, 2 => 20 МГц и т.д. */
     const int freqs[] = SPI_FREQ_LIST;
-    const int n = sizeof(freqs) / sizeof(freqs[0]);
-    const int min_mhz = 1;      // нижняя граница произвольного ввода
-    const int max_mhz = 80;     // верхняя граница (GPIO-матрица C3 ~80 МГц на практике)
-    const int default_mhz = 40; // значение по умолчанию при таймауте/ошибке
+    const int n = (int)(sizeof(freqs) / sizeof(freqs[0]));
 
     while (1) {
         printf("\n================ Выбор частоты шины SPI ================\n");
-        printf("Стандартные значения (введите номер):\n");
+        printf("Введите номер пункта и нажмите Enter:\n");
         for (int i = 0; i < n; i++) {
             printf("  %d) %d МГц\n", i + 1, freqs[i]);
         }
-        printf("Номер пункта: 1, 2, 3 ... %d\n", n);
-        printf("Или явная частота с суффиксом M, например 45M (%d..%d МГц).\n", min_mhz, max_mhz);
-        printf("(без ответа за %d c будет выбрано %d МГц)\n> ",
-               FREQ_INPUT_TIMEOUT_MS / 1000, default_mhz);
+        printf("Или частоту: 45  либо  45M  (%d..%d МГц)\n", MIN_MHZ, MAX_MHZ);
+        printf("На Windows Enter = CR — это нормально, ввод принимается.\n");
+        printf("(без ответа за %d с будет %d МГц; потом можно сменить в любой момент)\n> ",
+               FREQ_INPUT_TIMEOUT_MS / 1000, DEFAULT_MHZ);
         fflush(stdout);
 
         char line[32];
         int rlen = uart_input_line(line, sizeof(line), FREQ_INPUT_TIMEOUT_MS);
         if (rlen < 0) {
-            // Терминал молчит (не подключён или никто не вводит) —
-            // берём значение по умолчанию, чтобы прошивка не зависела.
-            ESP_LOGW(TAG_FREQ, "Ввод не получен за %d мс — частота по умолчанию %d МГц",
-                     FREQ_INPUT_TIMEOUT_MS, default_mhz);
-            return default_mhz;
-        }
-        if (line[0] == 0) continue;         // пустой ввод — переспросить
-
-        char *endp = NULL;
-        long val = strtol(line, &endp, 10);
-
-        // Вариант 1: явная частота с суффиксом "M" (например "45M")
-        if (endp && (*endp == 'M' || *endp == 'm') && *(endp + 1) == 0) {
-            if (val >= min_mhz && val <= max_mhz) {
-                printf("Выбрано: %ld МГц\n", val);
-                return (int)val;
-            }
-            printf("Частота вне диапазона %d..%d МГц.\n", min_mhz, max_mhz);
-            continue;
+            ESP_LOGW(TAG_FREQ, "Ввод не получен за %d мс — %d МГц. Дальше можно ввести частоту в любой момент.",
+                     FREQ_INPUT_TIMEOUT_MS, DEFAULT_MHZ);
+            return DEFAULT_MHZ;
         }
 
-        // Вариант 2: просто число в мегагерцах (например "45")
-        if (*endp == 0 && val >= min_mhz && val <= max_mhz && val > n) {
-            printf("Выбрано: %ld МГц (прямое значение)\n", val);
-            return (int)val;
+        int mhz = spi_freq_parse_mhz(line);
+        if (mhz > 0) {
+            printf("Выбрано: %d МГц\n", mhz);
+            return mhz;
         }
-
-        // Вариант 3: номер пункта из списка (1, 2, 3 ...)
-        if (*endp == 0 && val >= 1 && val <= n) {
-            printf("Выбрано: пункт %ld -> %d МГц\n", val, freqs[val - 1]);
-            return freqs[val - 1];
-        }
-
-        printf("Некорректный ввод '%s'. Введите номер 1..%d или частоту вида 45M.\n",
-               line, n);
+        printf("Некорректный ввод '%s'. Пример: 2  или  40M\n", line);
     }
 }
