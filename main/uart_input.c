@@ -1,13 +1,17 @@
 /*
- * Приём строк с консольного UART.
+ * Приём строк с консольного UART (режим RAW).
  *
- * Важно для Windows / idf.py monitor:
- *   клавиша Enter шлёт '\r', а не '\n'. Старый код пропускал '\r'
- *   и ждал '\n', поэтому ввод никогда не завершался.
+ * КЛЮЧЕВОЕ РЕШЕНИЕ (почему раньше «ничего нельзя было написать»):
+ *   В IDF 5.x/6.x стандартный вывод консоли идёт через драйвер UART,
+ *   а VFS-слой stdin остаётся НЕинициализированным. Поэтому scanf()/getchar()
+ *   возвращают EOF мгновенно — меню не получало ввод вообще.
+ *   Теперь читаем байты НАПРЯМУЮ из RX-кольца драйвера (uart_read_bytes),
+ *   минуя VFS/stdin. Работает при любом CONFIG_ESP_CONSOLE_*.
+ *
+ *   Enter на Windows/idf.py monitor шлёт '\r', а не '\n' — принимаем оба.
  *
  * Документация:
- *   https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/api-reference/storage/vfs.html
- *   uart_vfs_dev_use_driver() возвращает void.
+ *   https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/api-reference/peripherals/uart.html
  */
 
 #include <stdio.h>
@@ -16,19 +20,24 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
-
-#if __has_include("driver/uart_vfs.h")
-#include "driver/uart_vfs.h"
-#define UART_VFS_HAS_NEW_API 1
-#elif __has_include("esp_vfs_dev.h")
-#include "esp_vfs_dev.h"
-#define UART_VFS_HAS_NEW_API 0
-#else
-#define UART_VFS_HAS_NEW_API -1
-#endif
-
 #include "esp_log.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
 #include "uart_input.h"
+
+/*
+ * Номер порта консоли определяем НЕ по CONFIG_ESP_CONSOLE_UART_NUM,
+ * а по реально настроенной консоли (esp_console_get_config). Если в sdkconfig
+ * осталась консоль USB-Serial-JTAG (частая причина «терминал молчит» на
+ * C3 SuperMini при подключении через micro-USB), выводим предупреждение:
+ * ввод придёт не в тот порт, к которому подключён терминал.
+ */
+#if __has_include("esp_console.h")
+#include "esp_console.h"  /* только для типов, сам esp_console не инициализируем */
+#define HAVE_ESP_CONSOLE 1
+#else
+#define HAVE_ESP_CONSOLE 0
+#endif
 
 #ifndef CONFIG_ESP_CONSOLE_UART_NUM
 #define CONFIG_ESP_CONSOLE_UART_NUM 0
@@ -49,23 +58,40 @@ void uart_input_init(void)
         return;
     }
 
+    /* NVS обязателен: без него часть подсистем консоли/Wi-Fi ведёт себя нестабильно */
+    esp_err_t nvs = nvs_flash_init();
+    if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+
     esp_err_t derr = uart_driver_install(UART_NUM, 1024, 0, 0, NULL, 0);
-    if (derr == ESP_ERR_INVALID_STATE) {
-        ESP_LOGI(TAG_UART_IN, "Драйвер UART%d уже установлен", (int)UART_NUM);
-    } else if (derr != ESP_OK) {
+    if (derr == ESP_OK) {
+        ESP_LOGI(TAG_UART_IN, "Драйвер UART%d установлен", (int)UART_NUM);
+    } else if (derr == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(TAG_UART_IN, "Драйвер UART%d уже установлен — переключаю в RAW-режим", (int)UART_NUM);
+    } else {
         ESP_LOGE(TAG_UART_IN, "uart_driver_install: %s", esp_err_to_name(derr));
     }
 
-#if UART_VFS_HAS_NEW_API == 1
-    uart_vfs_dev_use_driver(UART_NUM);
-    uart_vfs_dev_port_set_rx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CR);
-    uart_vfs_dev_port_set_tx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CRLF);
-#elif UART_VFS_HAS_NEW_API == 0
-    (void)esp_vfs_dev_uart_use_driver(UART_NUM);
+#if HAVE_ESP_CONSOLE
+    /* Предупреждение о несовпадении реальной консоли и порта, который мы слушаем */
+    esp_console_dev_uart_config_t cdbg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    if (cdbg.port_num != (int)UART_NUM) {
+        ESP_LOGW(TAG_UART_IN,
+                 "ВНИМАНИЕ: консоль собрана под UART%d, а меню слушает UART%d. "
+                 "Пересоберите после 'del sdkconfig' или подключите терминал к нужным пинам.",
+                 cdbg.port_num, (int)UART_NUM);
+    }
 #endif
 
+    /*
+     * Читаем байты напрямую из RX-кольца драйвера (uart_read_bytes),
+     * минуя VFS/stdin — см. шапку файла. Никаких VFS-вызовов не нужно.
+     */
+
     s_ready = true;
-    ESP_LOGI(TAG_UART_IN, "Ввод через UART%d готов (Enter = CR или LF)", (int)UART_NUM);
+    ESP_LOGW(TAG_UART_IN, "RAW-ввод: слушаю UART%d (GPIO20=RX, GPIO21=TX, 115200). Если лог идёт через встроенный USB — переключите консоль на USB-Serial-JTAG в sdkconfig.", (int)UART_NUM);
 }
 
 int uart_input_line(char *buf, size_t buf_size, int timeout_ms)
