@@ -1,15 +1,13 @@
 /*
  * Надёжный опрос UART0-консоли для интерактивного ввода.
  *
- * Почему нельзя использовать fgets(stdin) «как есть»:
- *  - в ESP-IDF начиная с v5.x стандартный ввод по умолчанию НЕ привязан
- *    к UART-консоли (CONFIG_ESP_CONSOLE_SECONDARY_NONE=y), поэтому fgets
- *    сразу возвращает EOF и код молча берёт частоту по умолчанию;
- *  - даже при включённом secondary-input fgets без таймаута может
- *    «зависнуть» намертво, если терминал не подключён.
+ * ESP-IDF 5.3+ / 6.x:
+ *  - UART VFS перенесён в esp_driver_uart
+ *  - esp_vfs_dev_uart_*  →  uart_vfs_dev_*
+ *  - заголовок: driver/uart_vfs.h
  *
- * Здесь: прямой приём байтов через driver/uart + VFS-обёртка
- * esp_vfs_dev_uart_use_driver(0), чтобы getline()/stdin тоже работали.
+ * Документация:
+ *  https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/migration-guides/release-5.x/5.3/storage.html
  */
 
 #include <stdio.h>
@@ -17,14 +15,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
+
 // Совместимость версий ESP-IDF:
-//  - IDF <= 5.3: esp_vfs_dev_uart_use_driver() объявлена в esp_vfs_dev.h (компонент vfs);
-//  - IDF >= 6.0: заголовок esp_vfs_dev.h УДАЛЁН, функция перенесена в driver/uart_vfs.h.
+//  - IDF >= 5.3 / 6.x : driver/uart_vfs.h + uart_vfs_dev_use_driver()
+//  - IDF <= 5.2       : esp_vfs_dev.h     + esp_vfs_dev_uart_use_driver()
 #if __has_include("driver/uart_vfs.h")
-#include "driver/uart_vfs.h"   // ESP-IDF 6.x
+#include "driver/uart_vfs.h"          // ESP-IDF 5.3+ / 6.x
+#define UART_VFS_USE_DRIVER(n)  uart_vfs_dev_use_driver(n)
 #elif __has_include("esp_vfs_dev.h")
-#include "esp_vfs_dev.h"       // ESP-IDF 5.x
+#include "esp_vfs_dev.h"              // ESP-IDF 5.0 – 5.2
+#define UART_VFS_USE_DRIVER(n)  esp_vfs_dev_uart_use_driver(n)
+#else
+#define UART_VFS_USE_DRIVER(n)  ESP_ERR_NOT_SUPPORTED
 #endif
+
 #include "esp_log.h"
 #include "uart_input.h"
 
@@ -35,10 +39,9 @@ void uart_input_init(void)
 {
     if (s_ready) return;
 
-    // Инициализируем ДРАЙВЕР приёма UART0.
-    // ВАЖНО: uart_driver_install() НЕ трогает baud/конфигурацию —
-    // настройки, заданные ROM-консолью на этапе загрузки, сохраняются,
-    // поэтому лог и ввод идут на той же скорости 115200.
+    // Инициализируем драйвер приёма UART0.
+    // uart_driver_install() не трогает baud/конфигурацию —
+    // настройки ROM-консоли сохраняются (обычно 115200).
     esp_err_t derr = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
     if (derr == ESP_ERR_INVALID_STATE) {
         ESP_LOGI(TAG_UART_IN, "Драйвер UART0 уже установлен — используем его");
@@ -46,13 +49,10 @@ void uart_input_init(void)
         ESP_LOGE(TAG_UART_IN, "uart_driver_install: %s", esp_err_to_name(derr));
     }
 
-    // Привязать stdin к драйверу UART0 (а не к ROM-функциям).
-    // Насколько известно из документации ESP-IDF, вызов допустим в
-    // любое время; делаем best-effort: при неудаче полагаемся на
-    // прямой опрос UART через uart_read_bytes().
-    esp_err_t verr = esp_vfs_dev_uart_use_driver(0);
+    // Привязать stdin к драйверу UART0
+    esp_err_t verr = UART_VFS_USE_DRIVER(0);
     if (verr != ESP_OK) {
-        ESP_LOGW(TAG_UART_IN, "esp_vfs_dev_uart_use_driver: %s (используем прямой опрос UART)",
+        ESP_LOGW(TAG_UART_IN, "uart_vfs_dev_use_driver: %s (используем прямой опрос UART)",
                  esp_err_to_name(verr));
     }
 
@@ -69,23 +69,23 @@ int uart_input_line(char *buf, size_t buf_size, int timeout_ms)
 
     while ((int)(deadline - xTaskGetTickCount()) > 0) {
         uint8_t ch;
-        int n = uart_read_bytes(0, &ch, 1, pdMS_TO_TICKS(50));
+        int n = uart_read_bytes(UART_NUM_0, &ch, 1, pdMS_TO_TICKS(50));
         if (n <= 0) continue;
 
-        // Игнорируем символы управления и перевод строк между «строками»
         if (ch == '\r') continue;
         if (ch == '\n') {
-            if (len == 0) continue;      // пустая строка — ждём дальше
+            if (len == 0) continue;
             buf[len] = 0;
-            return (int)len;             // полная строка получена
+            return (int)len;
         }
-        if (ch >= ' ' && ch <= '~') {    // только печатаемые ASCII
+        if (ch >= ' ' && ch <= '~') {
             if (len + 1 < buf_size) {
                 buf[len++] = (char)ch;
-                uart_write_byte(0, ch);  // эхо набранного в терминал
+                // Эхо в терминал (правильная функция — uart_write_bytes)
+                uart_write_bytes(UART_NUM_0, (const char *)&ch, 1);
             }
         }
     }
     buf[0] = 0;
-    return -1;                           // таймаут — данных не было
+    return -1;   // таймаут
 }
