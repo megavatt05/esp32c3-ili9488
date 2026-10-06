@@ -26,17 +26,19 @@
 #include "uart_input.h"
 
 /*
- * Номер порта консоли определяем НЕ по CONFIG_ESP_CONSOLE_UART_NUM,
- * а по реально настроенной консоли (esp_console_get_config). Если в sdkconfig
- * осталась консоль USB-Serial-JTAG (частая причина «терминал молчит» на
- * C3 SuperMini при подключении через micro-USB), выводим предупреждение:
- * ввод придёт не в тот порт, к которому подключён терминал.
+ * VFS-привязка stdin к драйверу UART. В IDF 6.x API переехал в
+ * driver/uart_vfs.h (uart_vfs_dev_use_driver); в IDF 5.x — esp_vfs_dev.h.
+ * Без этой привязки scanf()/getchar() читают из «сырого» VFS и мгновенно
+ * возвращают EOF — одна из причин, почему раньше нельзя было ничего ввести.
  */
-#if __has_include("esp_console.h")
-#include "esp_console.h"  /* только для типов, сам esp_console не инициализируем */
-#define HAVE_ESP_CONSOLE 1
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"
+#define UART_VFS_NEW_API 1
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"
+#define UART_VFS_NEW_API 0
 #else
-#define HAVE_ESP_CONSOLE 0
+#define UART_VFS_NEW_API -1
 #endif
 
 #ifndef CONFIG_ESP_CONSOLE_UART_NUM
@@ -74,24 +76,26 @@ void uart_input_init(void)
         ESP_LOGE(TAG_UART_IN, "uart_driver_install: %s", esp_err_to_name(derr));
     }
 
-#if HAVE_ESP_CONSOLE
-    /* Предупреждение о несовпадении реальной консоли и порта, который мы слушаем */
-    esp_console_dev_uart_config_t cdbg = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    if (cdbg.port_num != (int)UART_NUM) {
-        ESP_LOGW(TAG_UART_IN,
-                 "ВНИМАНИЕ: консоль собрана под UART%d, а меню слушает UART%d. "
-                 "Пересоберите после 'del sdkconfig' или подключите терминал к нужным пинам.",
-                 cdbg.port_num, (int)UART_NUM);
+#if UART_VFS_NEW_API == 1
+    /* IDF 6.x: привязываем stdin/stdout к драйверу и переводим CR в LF */
+    uart_vfs_dev_use_driver(UART_NUM);
+    uart_vfs_dev_port_set_rx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_tx_line_endings(UART_NUM, ESP_LINE_ENDINGS_CRLF);
+    ESP_LOGI(TAG_UART_IN, "stdin привязан к драйверу UART%d (uart_vfs_dev)", (int)UART_NUM);
+#elif UART_VFS_NEW_API == 0
+    esp_err_t verr = esp_vfs_dev_uart_use_driver(UART_NUM);
+    if (verr != ESP_OK) {
+        ESP_LOGE(TAG_UART_IN, "esp_vfs_dev_uart_use_driver: %s", esp_err_to_name(verr));
+    } else {
+        ESP_LOGI(TAG_UART_IN, "stdin привязан к драйверу UART%d (esp_vfs_dev)", (int)UART_NUM);
     }
+#else
+    ESP_LOGW(TAG_UART_IN, "VFS-dev заголовок не найден — доступен только RAW-ввод");
 #endif
 
-    /*
-     * Читаем байты напрямую из RX-кольца драйвера (uart_read_bytes),
-     * минуя VFS/stdin — см. шапку файла. Никаких VFS-вызовов не нужно.
-     */
-
     s_ready = true;
-    ESP_LOGW(TAG_UART_IN, "RAW-ввод: слушаю UART%d (GPIO20=RX, GPIO21=TX, 115200). Если лог идёт через встроенный USB — переключите консоль на USB-Serial-JTAG в sdkconfig.", (int)UART_NUM);
+    ESP_LOGI(TAG_UART_IN, "Ввод готов: слушаю UART%d напрямую (GPIO20=RX, GPIO21=TX, 115200). "
+             "Если лог идёт через встроенный USB-C3 — включите консоль USB-Serial-JTAG.", (int)UART_NUM);
 }
 
 int uart_input_line(char *buf, size_t buf_size, int timeout_ms)
