@@ -165,6 +165,58 @@ IDF (github.com/espressif/esp-idf → поиск по тегу версии). П
 
 ---
 
+## 12. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
+Симптом: сборка падает ЕЩЁ до компиляции, на этапе `Processing dependencies`:
+```
+CMake Error at .../tools/cmake/build.cmake (message):
+  Failed to resolve component 'esp_vfs_dev' required by component 'main': unknown name.
+```
+Причина: `esp_vfs_dev` — это НЕ компонент ESP-IDF, а всего лишь заголовок/модуль
+внутри компонента `vfs`. Указывать его в `REQUIRES` нельзя.
+Решение:
+- в `main/CMakeLists.txt` заменить `esp_vfs_dev` на `vfs` (для IDF 5.x);
+- в IDF 6.0 модуль esp_vfs_dev упразднён полностью, а `esp_vfs_dev_uart_use_driver()`
+  перенесена в `driver/uart_vfs.h` (компонент `driver`) — в REQUIRES достаточно `driver`;
+- для совместимости 5.x/6.x использовать guarded include:
+```c
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"   // ESP-IDF 6.x
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"       // ESP-IDF 5.x
+#endif
+```
+Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
+
+## 13. «Терминал молчит, ничего нельзя ввести» (ветка main, IDF 6.x)
+
+**Симптом:** меню частоты SPI печатается, но нажатие клавиш и Enter ничего не делает;
+после таймаута берётся значение по умолчанию.
+
+**Диагноз — три независимые причины, проверять сверху вниз:**
+
+1. **Физический путь данных не тот.** На ESP32-C3 есть ДВА консольных канала:
+   UART0 (GPIO20/21, внешний USB-UART-мост или адаптер) и встроенный USB-Serial-JTAG
+   (разъём micro-USB платы). Если логи идут через один канал, а `CONFIG_ESP_CONSOLE_*`
+   собран для другого — вывод есть, ввода нет. Проверка: в логе загрузчика строка
+   `GPIO 20 and 21 are used as console UART I/O pins` = UART0; её нет = USB-JTAG.
+   Быстрый тест: переткнуть кабель/адаптер и посмотреть, куда приходит лог.
+
+2. **stdin не привязан к драйверу UART.** В IDF 5.x/6.x при консоли через драйвер
+   VFS-слой stdin остаётся неинициализированным: `scanf()/getchar()` возвращают EOF
+   мгновенно. Лечение: `uart_vfs_dev_use_driver(UART_NUM)` (IDF ≥5.3,
+   `driver/uart_vfs.h`) или `esp_vfs_dev_uart_use_driver()` (старые IDF), плюс
+   `uart_vfs_dev_port_set_rx_line_endings(..., ESP_LINE_ENDINGS_CR)` — Windows Enter = CR.
+   Надёжнее читать напрямую из RX-кольца: `uart_read_bytes()` + своё эхо (реализовано
+   в main/uart_input.c).
+
+3. **Драйвер UART не установлен.** `uart_read_bytes()` без предварительного
+   `uart_driver_install()` всегда вернёт 0. Код `ESP_ERR_INVALID_STATE` — штатный
+   случай (drv уже стоит, например его заняла консоль) — продолжать работу.
+
+**Профилактика:** любое чтение с консоли оборачивать в функцию с явным init
+(uart_driver_install + VFS-привязка) и таймаутом; никогда не смешивать scanf()
+и uart_read_bytes() на одном порту без понимания, какой слой их обслуживает.
+
 ## MCP-серверы Espressif: использование в работе над проектом
 
 ### Статус проверки (октябрь 2026)
@@ -236,28 +288,6 @@ url = "https://mcp.vision.espressif.com"
 
 ---
 
-## 12. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
-Симптом: сборка падает ЕЩЁ до компиляции, на этапе `Processing dependencies`:
-```
-CMake Error at .../tools/cmake/build.cmake (message):
-  Failed to resolve component 'esp_vfs_dev' required by component 'main': unknown name.
-```
-Причина: `esp_vfs_dev` — это НЕ компонент ESP-IDF, а всего лишь заголовок/модуль
-внутри компонента `vfs`. Указывать его в `REQUIRES` нельзя.
-Решение:
-- в `main/CMakeLists.txt` заменить `esp_vfs_dev` на `vfs` (для IDF 5.x);
-- в IDF 6.0 модуль esp_vfs_dev упразднён полностью, а `esp_vfs_dev_uart_use_driver()`
-  перенесена в `driver/uart_vfs.h` (компонент `driver`) — в REQUIRES достаточно `driver`;
-- для совместимости 5.x/6.x использовать guarded include:
-```c
-#if __has_include("driver/uart_vfs.h")
-#include "driver/uart_vfs.h"   // ESP-IDF 6.x
-#elif __has_include("esp_vfs_dev.h")
-#include "esp_vfs_dev.h"       // ESP-IDF 5.x
-#endif
-```
-Правило: в REQUIRES перечислять только реальные компоненты (`ls $IDF_PATH/components`).
-
 ## Чек-лист перед push
 - [ ] **Посмотрены связанные примеры (раздел 0) ДО написания кода**
 - [ ] `idf.py build` проходит локально (или CI зелёный)
@@ -266,3 +296,4 @@ CMake Error at .../tools/cmake/build.cmake (message):
 - [ ] socket-код содержит полный набор инклюдов (раздел 11)
 - [ ] комментарии на русском, сообщения лога — на русском
 - [ ] свежая ошибка добавлена в ERRORS.md и в этот навык
+

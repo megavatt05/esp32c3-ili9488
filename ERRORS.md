@@ -8,7 +8,7 @@
 | 1 | `undefined reference to font_*` при линковке .elf | lvgl9 | ✅ исправлено |
 | 2 | `fatal error: lvgl/lvgl.h: No such file or directory` | lvgl9 | ✅ исправлено |
 | 3 | `'ESP_ERR_NOT_FIT' undeclared` | main | ✅ исправлено |
-| 4 | Частота SPI не меняется через терминал | main | ✅ исправлено |
+| 4 | Частота SPI не меняется через терминал (scanf EOF, нет привязки stdin к драйверу) | main | ✅ исправлено (коммиты 46c4b7d, 4703b5d: RAW-чтение uart_read_bytes + VFS-привязка) |
 | 5 | `Failed to resolve component 'esp_vfs_dev': unknown name` | main | ✅ исправлено |
 | 6 | `fatal error: driver/uart.h: No such file or directory` | main | ✅ исправлено |
 | 7 | `Failed to resolve component 'mdns': unknown name` | softap-webui | ✅ исправлено |
