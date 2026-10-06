@@ -79,3 +79,15 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_NUM=0
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# ====================== Проверено по официальной документации (окт. 2026) ======================
+# LWIP: по docs ESP-IDF v6.0 (api-reference/protocols/lwip.html) сокет-опции
+# переопределяют SO_REUSEADDR глобально. Без этого bind() DNS-перехвата на
+# порт 53 и повторный старт HTTP-сервера падают после перезапуска клиента.
+CONFIG_LWIP_SO_REUSE=y
+CONFIG_LWIP_SO_RCVBUF=y
+
+# Wi-Fi SoftAP: фиксация HT20 (20 МГц). По docs esp_wifi_set_band_mode/
+# secondary channel — HT40 на C3 вызывает дребезг "wifi:new:<6,0>/<6,1>"
+# и reason=15 у клиентов. Канал 6 задаётся в коде (softap.c), здесь — буферы.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y

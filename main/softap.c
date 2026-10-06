@@ -262,7 +262,14 @@ static void http_server_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = DGW_HTTP_PORT;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
-    cfg.max_open_sockets = 7;
+    // По документации ESP-IDF (esp_http_server, struct httpd_config):
+    // max_open_sockets должен быть МЕНЬШЕ CONFIG_LWIP_MAX_SOCKETS (у нас 24),
+    // т.к. часть сокетов занимают DNS-перехват и сам стек. 10 слотов хватает
+    // на всплеск фоновых HTTPS-проб телефона при captive portal.
+    cfg.max_open_sockets = 10;
+    // Отключаем управляющий сокет (по умолчанию занимает +1 дескриптор):
+    // нам не нужен httpd_closes_all извне — сервер живёт всё время работы AP.
+    cfg.ctrl_port = -1;
 
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "Не удалось запустить HTTP-сервер");
@@ -334,6 +341,11 @@ esp_err_t softap_start(void)
     strlcpy((char *)wc.ap.password, DGW_AP_PASS, sizeof(wc.ap.password));
     wc.ap.ssid_len = strlen(ssid);
     wc.ap.channel = 6;
+    // По документации ESP-IDF (api-reference/network/esp_wifi.html, поле
+    // wifi_softap_config_t::ht_channel_width) для SoftAP НУЖНО явно задать
+    // HT20. Иначе драйвер сам переключает 20/40 МГц и в логе дребещет
+    // "wifi:new:<6,0>/<6,1>", а телефоны отваливаются с reason=15.
+    wc.ap.ht_channel_width = WIFI_HT_SECONDARY_NONE;  // только HT20, без HT40
     wc.ap.max_connection = DGW_MAX_CONN;
     wc.ap.authmode = WIFI_AUTH_WPA2_PSK;
 
