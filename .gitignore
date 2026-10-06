@@ -1,4 +1,18 @@
-build/managed_components/
+# Артефакты сборки ESP-IDF
+build/
+managed_components/
 dependencies.lock
+
+# Конфигурация (генерируется из sdkconfig.defaults)
 sdkconfig
 sdkconfig.old
+
+# Python
+__pycache__/
+*.pyc
+
+# Временные файлы
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

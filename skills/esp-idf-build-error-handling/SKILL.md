@@ -202,6 +202,38 @@ MCP-серверы Espressif **не используются**: они треб�
 - При обновлении IDF проверять `idf.py --version` и changelog миграции:
   https://docs.espressif.com/projects/esp-idf/en/stable/esp32/migration-guides/release-6.x/
 
+### Удалённые MCP-серверы Espressif (HTTP, работают без локальной IDF)
+Подключаются одной строкой, не требуют ESP-IDF на машине агента:
+
+| Сервер | URL | Назначение |
+|--------|-----|------------|
+| **ESP Component Registry** | `https://components.espressif.com/mcp` | поиск компонентов/примеров, проверка совместимости версий и таргетов (esp32c3, IDF 6.x) |
+| **ESP Pilot** | `https://mcp.esp-pilot.espressif.com/mcp` | ADF/GMF мультимедиа, ESP Board Manager (board YAML) |
+| **ESP-VISION** | `https://mcp.vision.espressif.com` | API камеры/on-device AI, чипозависимость (ТОЛЬКО ESP32-P4/S3 — неприменимо к C3!) |
+
+Подключение (Codex CLI):
+```bash
+codex mcp add esp-component-registry --url "https://components.espressif.com/mcp"
+codex mcp add esp-pilot-mcp          --url "https://mcp.esp-pilot.espressif.com/mcp"
+codex mcp add esp-vision             --url "https://mcp.vision.espressif.com"
+```
+Ручная конфигурация (`config.toml`):
+```toml
+[mcp_servers.esp-component-registry]
+url = "https://components.espressif.com/mcp"
+[mcp_servers.esp-pilot-mcp]
+url = "https://mcp.esp-pilot.espressif.com/mcp"
+[mcp_servers.esp-vision]
+url = "https://mcp.vision.espressif.com"
+```
+
+Правила использования (подробно — в глобальном навыке `~/.qwen/skills/esp-component-registry-mcp`):
+- **R1**: перед написанием собственного драйвера/обёртки — искать готовый компонент в реестре;
+- **R2**: перед добавлением в `idf_component.yml` — проверять target (esp32c3!) и совместимость с IDF ≥6.0;
+- **R3**: брать example компонента из реестра вместо кода «по памяти» (см. Правило 0);
+- **R4**: маршрутизация: компоненты → Component Registry; документация API IDF → Documentation MCP;
+  ADF/Board Manager → ESP Pilot; камера/AI → ESP-VISION (не для C3); build/flash → локальный idf.py.
+
 ---
 
 ## 12. CMake Error: Failed to resolve component 'esp_vfs_dev' ... unknown name
