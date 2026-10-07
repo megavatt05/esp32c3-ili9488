@@ -1,41 +1,25 @@
-# uart-only — ESP32-C3 UART TX/RX
+# uart-only — стандартный пример UART Echo (ESP-IDF v6.0.3)
 
-Ветка **без дисплея и без Wi-Fi**. Только полный UART: приём, отправка, ввод с клавиатуры в `idf.py monitor`.
+Чистая ветка без LVGL, дисплея и Wi-Fi: официальный пример
+`examples/peripherals/uart/echo` из ESP-IDF v6.0.3, адаптированный под
+esp32c3 с комментариями на русском.
 
-## Железо
+## Что делает
+- **UART1** (TX=GPIO4, RX=GPIO5) каждую секунду отправляет тестовую строку;
+- **UART2** (TX=GPIO6, RX=GPIO7) принимает её и возвращает обратно эхом;
+- консоль/отладка — UART0 (GPIO20/21, 115200).
 
-ESP32-C3 Super Mini, USB-UART:
-
-| Сигнал | GPIO |
-|--------|------|
-| UART0 RX | 20 |
-| UART0 TX | 21 |
-| GND | GND |
-
-Скорость: **115200 8N1**.
+Для работы примера нужна **перемычка GPIO4→GPIO7 и GPIO5→GPIO6**
+(или просто GPIO4→GPIO6/TX2-RX2 по схеме loopback на вашей плате).
 
 ## Сборка
-
-```powershell
-git fetch origin
-git checkout uart-only
-idf.py fullclean
+```bash
 idf.py set-target esp32c3
-idf.py build
-idf.py -p COMx flash monitor
+del sdkconfig          # Windows (rm -rf sdkconfig на Linux)
+idf.py fullclean
+idf.py build flash monitor
 ```
 
-В мониторе печатай текст и нажимай **Enter** (Windows CR поддерживается).
-
-## Команды
-
-| Ввод | Что делает |
-|------|-----------|
-| любой текст | эхо обратно в терминал |
-| `help` | список команд |
-| `ping` | ответ `pong` |
-| `echo привет` | отправить строку |
-| `hex привет` | то же в hex |
-| `stats` | счётчики RX/TX |
-| `tick on` / `tick off` | периодическая отправка статуса |
-| `info` | UART, baud, пины |
+## Примечание про ESP-IDF 6.x
+Драйвер UART вынесен в отдельный компонент `esp_driver_uart` — он указан в
+`REQUIRES` файла `main/CMakeLists.txt` (вместо зонтичного `driver`).
