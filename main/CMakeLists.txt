@@ -25,7 +25,7 @@ if(EXISTS "$ENV{IDF_PATH}/components/esp_driver_uart")
         esp_driver_spi
     )
 else()
-    # Older ESP-IDF (5.0 – 5.2)
+    # Older ESP-IDF (5.0 - 5.2)
     list(APPEND MAIN_REQUIRES driver)
 endif()
 
@@ -38,4 +38,7 @@ idf_component_register(
         "."
     REQUIRES
         ${MAIN_REQUIRES}
+    # nvs_flash нужен только uart_input.c (nvs_flash_init) - приватная зависимость
+    PRIV_REQUIRES
+        nvs_flash
 )
